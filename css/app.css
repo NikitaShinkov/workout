@@ -44,6 +44,14 @@ button, input, textarea {
   color: var(--text);
 }
 
+/* Figma has "Vertical trim: cap height to baseline" on its text. Without it the
+   browser's standard half-leading adds space above and below every line, so an
+   identical `gap` renders looser than the design. Inputs are left alone: their
+   text is centred by the UA and trimming it shifts the caret off-centre. */
+p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
+  text-box: trim-both cap alphabetic;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -117,6 +125,8 @@ button, input, textarea {
 }
 
 .menu-button {
+  display: inline-flex;
+  align-items: center;
   height: 24px;
   padding: 0 8px;
   border: 0;
@@ -394,15 +404,17 @@ button, input, textarea {
 .exercise-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
+/* 66px keeps the design's row pitch (previously 58px + an 8px gap) while the
+   taller padding leaves the 50px image intact, so the hover fill now covers the
+   whole pitch instead of leaving a stripe between rows. */
 .exercise-row {
   display: flex;
   align-items: center;
   gap: 20px;
-  height: 58px;
-  padding: 4px 10px;
+  height: 66px;
+  padding: 8px 10px;
   overflow: hidden;
   flex-shrink: 0;
   cursor: default;
@@ -412,6 +424,19 @@ button, input, textarea {
 .exercise-row:hover,
 .exercise-row--selected {
   background: var(--hover-bg);
+}
+
+.exercise-row--dragging {
+  opacity: 0.4;
+}
+
+/* Insertion marker while dragging rows. Drawn inset so it is not clipped. */
+.exercise-row--drop-before {
+  box-shadow: inset 0 2px 0 0 var(--active);
+}
+
+.exercise-row--drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--active);
 }
 
 .exercise-row__description {
@@ -430,17 +455,30 @@ button, input, textarea {
   align-items: flex-start;
 }
 
-.exercise-row__image {
-  display: block;
+/* Holds the still frame, and the hover animation that replaces it. */
+.exercise-row__image-box {
+  position: relative;
   width: 89px;
   height: 50px;
   flex-shrink: 0;
+  overflow: hidden;
+  background: var(--not-selected);
+}
+
+.exercise-row__image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
   object-fit: cover;
   pointer-events: none;
 }
 
-.exercise-row__image--empty {
-  background: var(--not-selected);
+/* The class sets display, which would otherwise beat the UA rule for [hidden]
+   when the hover animation takes over. */
+.exercise-row__image[hidden] {
+  display: none;
 }
 
 .exercise-row__titles {

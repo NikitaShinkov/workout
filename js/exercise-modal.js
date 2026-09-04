@@ -34,6 +34,9 @@ export function openExerciseModal(options) {
   );
 
   const isEdit = Boolean(exercise);
+  // Editing shows the exercise's own name as the heading; creating shows the
+  // generic title. A nameless exercise still needs something to show.
+  const heading = isEdit ? (exercise.name || 'Упражнение') : 'Новое упражнение';
 
   // --- elements -----------------------------------------------------------
   const nameInput = el('input', {
@@ -227,11 +230,11 @@ export function openExerciseModal(options) {
 
   const popup = el(
     'div',
-    { class: 'popup', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Новое упражнение' },
+    { class: 'popup', role: 'dialog', 'aria-modal': 'true', 'aria-label': heading },
     el(
       'div',
       { class: 'popup__form' },
-      el('p', { class: 'popup__title', text: 'Новое упражнение' }),
+      el('p', { class: 'popup__title', text: heading }),
       el(
         'div',
         { class: 'popup__fields' },
@@ -279,7 +282,7 @@ export function openExerciseModal(options) {
 
   // --- submit / cancel ----------------------------------------------------
 
-  submitButton.addEventListener('click', () => {
+  function submit() {
     const fields = {
       name: nameInput.value.trim(),
       description: descriptionInput.value.trim(),
@@ -288,6 +291,28 @@ export function openExerciseModal(options) {
     };
     closeModal();
     if (onSubmit) onSubmit(fields);
+  }
+
+  submitButton.addEventListener('click', submit);
+
+  // Enter submits; Ctrl+Enter is how you get a line break in the description.
+  popup.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+
+    // Enter on a focused button activates that button, as usual.
+    if (event.target.tagName === 'BUTTON') return;
+
+    if (event.ctrlKey || event.metaKey) {
+      if (event.target === descriptionInput) {
+        event.preventDefault();
+        const { selectionStart, selectionEnd } = descriptionInput;
+        descriptionInput.setRangeText('\n', selectionStart, selectionEnd, 'end');
+      }
+      return;
+    }
+
+    event.preventDefault();
+    submit();
   });
 
   // A click outside the popup cancels. Using mousedown would fire mid

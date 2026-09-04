@@ -3,6 +3,7 @@
 import { CATEGORIES, INDICATORS, createExercise } from './model.js';
 import { el, svg, clear } from './dom.js';
 import { blobUrl, filesToImageBlobs } from './images.js';
+import { createSequenceAnimation } from './animation.js';
 import { openExerciseModal, isModalOpen } from './exercise-modal.js';
 import {
   getState,
@@ -11,6 +12,7 @@ import {
   addExercise,
   updateExercise,
   deleteExercises,
+  reorderExercises,
   toggleFavorite,
   setActiveCategory,
   setUiFlag,
@@ -35,20 +37,29 @@ const STAR_PATH =
   '20.9372 16.7974 20.8115 16.5074 20.6041L11.4953 16.9378L6.49257 20.6041C6.20256 20.8115 5.93461 ' +
   '20.9372 5.68873 20.9812C5.44285 21.0314 5.22219 20.9812 5.02675 20.8303Z';
 
-// Feedback level -> colour. Absent feedback renders transparent, which is the
-// "no rating yet" state the spec asks for.
+const NOT_SELECTED = 'var(--not-selected)';
+
+// Feedback level -> colour. A slot with no rating yet shows the "not selected"
+// grey rather than nothing at all.
 const LEVEL_COLORS = {
   easy: 'var(--easy)',
   medium: 'var(--avr)',
   hard: 'var(--hard)',
-  none: 'var(--not-selected)',
+  none: NOT_SELECTED,
 };
 
 const INDICATOR_SLOTS = 5;
 
-// Transient UI state - selection is not worth persisting across reloads.
+// Transient UI state - not worth persisting across reloads.
 let selectedIds = new Set();
 let anchorIndex = null;
+
+// Row drag state.
+let draggingIds = null;
+let rowDropTarget = null;
+
+// Hover animations, keyed by their image box so each can be torn down again.
+const rowAnimations = new Map();
 
 let root = null;
 let pagePicker = null;
@@ -56,7 +67,7 @@ let pagePicker = null;
 export function mountSchedulePage(container) {
   root = container;
 
-  // One file input reused by both Add_exercise_button placements.
+  // One file input reused by every Add_exercise_button placement and by Ctrl+D.
   pagePicker = el('input', {
     class: 'visually-hidden',
     type: 'file',
@@ -67,6 +78,7 @@ export function mountSchedulePage(container) {
   document.body.appendChild(pagePicker);
 
   document.addEventListener('keydown', onDocumentKeydown);
+  document.addEventListener('click', onDocumentClick);
 
   subscribe(render);
   render();
@@ -89,9 +101,7 @@ async function onImagesPicked() {
   openExerciseModal({
     images,
     defaultEquipment: getState().lastEquipment,
-    onSubmit: (fields) => {
-      addExercise(createExercise(fields));
-    },
+    onSubmit: (fields) => addExercise(createExercise(fields)),
   });
 }
 
@@ -106,7 +116,7 @@ function startEditExercise(exercise) {
 // --- selection -------------------------------------------------------------
 
 function onExerciseClick(event, index) {
-  const exercises = visibleExercises();
+  const exercises = activeCategory().exercises;
 
   if (event.shiftKey && anchorIndex !== null) {
     // Shift: select the range between the anchor and this row.
@@ -127,8 +137,33 @@ function onExerciseClick(event, index) {
   render();
 }
 
+function clearSelection() {
+  selectedIds = new Set();
+  anchorIndex = null;
+}
+
+// A left click anywhere outside the exercise list drops the selection.
+function onDocumentClick(event) {
+  if (isModalOpen()) return;
+  if (selectedIds.size === 0) return;
+
+  const target = event.target;
+  if (target && target.closest && target.closest('.exercise-list')) return;
+
+  clearSelection();
+  render();
+}
+
 function onDocumentKeydown(event) {
   if (isModalOpen()) return;
+
+  // Ctrl+D starts a new exercise. Works from anywhere on the page, so it is
+  // handled before the "ignore keys while typing" guard below.
+  if ((event.ctrlKey || event.metaKey) && (event.key === 'd' || event.key === 'D')) {
+    event.preventDefault(); // Ctrl+D is "bookmark this page" otherwise
+    startAddExercise();
+    return;
+  }
 
   const tag = event.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return; // do not eat edits in fields
@@ -136,13 +171,106 @@ function onDocumentKeydown(event) {
   if (event.key === 'Delete' && selectedIds.size > 0) {
     event.preventDefault();
     deleteExercises(Array.from(selectedIds));
-    selectedIds = new Set();
-    anchorIndex = null;
+    clearSelection();
   }
 }
 
-function visibleExercises() {
-  return activeCategory().exercises;
+// --- hover animation -------------------------------------------------------
+
+function startRowAnimation(box, exercise) {
+  // A single image has nothing to animate.
+  if (exercise.images.length < 2 || rowAnimations.has(box)) return;
+
+  const still = box.querySelector('.exercise-row__image');
+  if (still) still.hidden = true;
+
+  const animation = createSequenceAnimation(box);
+  animation.setFrames(exercise.images.map(blobUrl));
+  rowAnimations.set(box, animation);
+}
+
+function stopRowAnimation(box) {
+  const animation = rowAnimations.get(box);
+  if (!animation) return;
+
+  animation.destroy();
+  rowAnimations.delete(box);
+
+  const still = box.querySelector('.exercise-row__image');
+  if (still) still.hidden = false;
+}
+
+// A re-render throws the rows away; their timers must go with them or they keep
+// ticking against detached images.
+function stopAllRowAnimations() {
+  for (const animation of rowAnimations.values()) animation.destroy();
+  rowAnimations.clear();
+}
+
+// --- row drag and drop -----------------------------------------------------
+
+function clearRowDropMarkers() {
+  const list = root.querySelector('.exercise-list');
+  if (!list) return;
+  for (const node of list.querySelectorAll('.exercise-row')) {
+    node.classList.remove('exercise-row--drop-before', 'exercise-row--drop-after');
+  }
+}
+
+function onRowDragStart(event, exercise, rowEl) {
+  // Dragging a selected row moves the whole selection; dragging an unselected
+  // one moves just that row and leaves the selection alone.
+  draggingIds = selectedIds.has(exercise.id) ? Array.from(selectedIds) : [exercise.id];
+
+  event.dataTransfer.setData('text/plain', draggingIds.join(','));
+  event.dataTransfer.effectAllowed = 'move';
+
+  // Re-rendering here would destroy the node being dragged and abort the drag,
+  // so the visual state is applied directly.
+  const list = root.querySelector('.exercise-list');
+  const ids = new Set(draggingIds);
+  for (const node of list.querySelectorAll('.exercise-row')) {
+    if (ids.has(node.dataset.id)) node.classList.add('exercise-row--dragging');
+  }
+  stopRowAnimation(rowEl.querySelector('.exercise-row__image-box'));
+}
+
+function onRowDragOver(event, index, rowEl) {
+  if (!draggingIds) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+
+  const box = rowEl.getBoundingClientRect();
+  const after = event.clientY > box.top + box.height / 2;
+  rowDropTarget = after ? index + 1 : index;
+
+  clearRowDropMarkers();
+  rowEl.classList.add(after ? 'exercise-row--drop-after' : 'exercise-row--drop-before');
+}
+
+function onRowDrop(event) {
+  event.preventDefault();
+
+  const ids = draggingIds;
+  const target = rowDropTarget;
+
+  clearRowDropMarkers();
+  draggingIds = null;
+  rowDropTarget = null;
+
+  if (ids && target !== null) reorderExercises(ids, target);
+}
+
+function onRowDragEnd() {
+  clearRowDropMarkers();
+  const list = root.querySelector('.exercise-list');
+  if (list) {
+    for (const node of list.querySelectorAll('.exercise-row--dragging')) {
+      node.classList.remove('exercise-row--dragging');
+    }
+  }
+  draggingIds = null;
+  rowDropTarget = null;
 }
 
 // --- render ----------------------------------------------------------------
@@ -151,10 +279,11 @@ function render() {
   const state = getState();
   const category = activeCategory();
 
-  // Drop selections that no longer exist (e.g. after a delete or a category switch).
+  // Drop selections that no longer exist (after a delete or category switch).
   const liveIds = new Set(category.exercises.map((e) => e.id));
   for (const id of Array.from(selectedIds)) if (!liveIds.has(id)) selectedIds.delete(id);
 
+  stopAllRowAnimations();
   clear(root);
 
   const hasExercises = category.exercises.length > 0;
@@ -189,8 +318,7 @@ function renderHeader(state) {
             type: 'button',
             text: category.name,
             onClick: () => {
-              selectedIds = new Set();
-              anchorIndex = null;
+              clearSelection();
               setActiveCategory(category.id);
             },
           })
@@ -327,9 +455,23 @@ function renderScheduleColumn(category) {
 }
 
 function renderExerciseColumn(state, category) {
-  const rows = category.exercises.map((exercise, index) =>
-    renderExerciseRow(state, exercise, index)
+  const list = el(
+    'div',
+    { class: 'exercise-list' },
+    category.exercises.map((exercise, index) => renderExerciseRow(state, exercise, index))
   );
+
+  // Dropping below the last row appends.
+  list.addEventListener('dragover', (event) => {
+    if (event.target === list && draggingIds) {
+      event.preventDefault();
+      rowDropTarget = category.exercises.length;
+      clearRowDropMarkers();
+    }
+  });
+  list.addEventListener('drop', (event) => {
+    if (event.target === list) onRowDrop(event);
+  });
 
   return el(
     'div',
@@ -340,7 +482,7 @@ function renderExerciseColumn(state, category) {
       el('span', { class: 'toolbar-label', text: 'Упражнения' }),
       renderAddButton('Добавить')
     ),
-    el('div', { class: 'exercise-list' }, rows)
+    list
   );
 }
 
@@ -354,17 +496,24 @@ function renderAddButton(label) {
 }
 
 function renderExerciseRow(state, exercise, index) {
-  const thumb = exercise.images.length
-    ? el('img', { class: 'exercise-row__image', src: blobUrl(exercise.images[0]), alt: '' })
-    : el('div', { class: 'exercise-row__image exercise-row__image--empty' });
+  const imageBox = el(
+    'div',
+    { class: 'exercise-row__image-box' },
+    exercise.images.length
+      ? el('img', { class: 'exercise-row__image', src: blobUrl(exercise.images[0]), alt: '' })
+      : null
+  );
 
   const row = el(
     'div',
     {
       class: 'exercise-row' + (selectedIds.has(exercise.id) ? ' exercise-row--selected' : ''),
+      draggable: 'true',
       dataset: { id: exercise.id },
       onClick: (event) => onExerciseClick(event, index),
       onDblclick: () => startEditExercise(exercise),
+      onMouseenter: () => startRowAnimation(imageBox, exercise),
+      onMouseleave: () => stopRowAnimation(imageBox),
     },
     el(
       'div',
@@ -372,7 +521,7 @@ function renderExerciseRow(state, exercise, index) {
       el(
         'div',
         { class: 'exercise-row__text-image' },
-        thumb,
+        imageBox,
         el(
           'div',
           { class: 'exercise-row__titles' },
@@ -385,6 +534,11 @@ function renderExerciseRow(state, exercise, index) {
     state.ui.showFavorites ? renderFavoriteStar(exercise) : null
   );
 
+  row.addEventListener('dragstart', (event) => onRowDragStart(event, exercise, row));
+  row.addEventListener('dragover', (event) => onRowDragOver(event, index, row));
+  row.addEventListener('drop', onRowDrop);
+  row.addEventListener('dragend', onRowDragEnd);
+
   return row;
 }
 
@@ -394,16 +548,18 @@ function renderIndicators(exercise) {
     { class: 'indicators' },
     INDICATORS.map((indicator) => {
       const history = (exercise.feedback && exercise.feedback[indicator.id]) || [];
-      // Newest five ratings, oldest first, padded with blanks on the left.
+      // The five most recent ratings, oldest first. Slots with no rating yet
+      // show the "not selected" grey.
       const recent = history.slice(-INDICATOR_SLOTS);
+      const offset = INDICATOR_SLOTS - recent.length;
       const cells = [];
 
       for (let i = 0; i < INDICATOR_SLOTS; i += 1) {
-        const entry = recent[i - (INDICATOR_SLOTS - recent.length)];
+        const entry = recent[i - offset];
         cells.push(
           el('span', {
             class: 'color-line__cell',
-            style: { background: entry ? LEVEL_COLORS[entry.level] || 'transparent' : 'transparent' },
+            style: { background: entry ? LEVEL_COLORS[entry.level] || NOT_SELECTED : NOT_SELECTED },
           })
         );
       }
@@ -425,7 +581,7 @@ function renderFavoriteStar(exercise) {
       '</svg>'
   );
 
-  const button = el(
+  return el(
     'button',
     {
       class: 'favorite-star' + (exercise.favorite ? ' favorite-star--active' : ''),
@@ -438,6 +594,4 @@ function renderFavoriteStar(exercise) {
     },
     star
   );
-
-  return button;
 }

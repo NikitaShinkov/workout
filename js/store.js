@@ -114,6 +114,28 @@ export function deleteExercises(ids) {
   });
 }
 
+// Move `ids` (keeping their relative order) so they land at `insertIndex`,
+// where insertIndex is a position in the CURRENT list.
+export function reorderExercises(ids, insertIndex) {
+  const moving = new Set(ids);
+
+  update((draft) => {
+    const category = draft.categories[draft.ui.activeCategory];
+    const list = category.exercises;
+
+    const picked = list.filter((e) => moving.has(e.id));
+    if (picked.length === 0) return;
+
+    // Removing the picked rows shifts the target left by however many of them
+    // sat above it.
+    const removedAbove = list.slice(0, insertIndex).filter((e) => moving.has(e.id)).length;
+    const rest = list.filter((e) => !moving.has(e.id));
+
+    rest.splice(insertIndex - removedAbove, 0, ...picked);
+    category.exercises = rest;
+  });
+}
+
 export function toggleFavorite(id) {
   update((draft) => {
     const exercise = draft.categories[draft.ui.activeCategory].exercises.find((e) => e.id === id);
