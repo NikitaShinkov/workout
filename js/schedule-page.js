@@ -549,7 +549,17 @@ function renderMenuButton(state, category, index) {
     draggingCategoryId = category.id;
     event.dataTransfer.setData('text/plain', category.id);
     event.dataTransfer.effectAllowed = 'move';
-    node.classList.add('menu-button--dragging');
+
+    // Dragging puts the button into the plain active state: selected, with the
+    // close button gone and the full name showing. The classes are applied by
+    // hand because a re-render here would replace the node being dragged and
+    // abort the gesture - the selection itself is committed on drop/dragend.
+    activeHoverArmed = false;
+    for (const other of root.querySelectorAll('.menu-button--active')) {
+      other.classList.remove('menu-button--active', 'menu-button--hover-armed');
+    }
+    node.classList.remove('menu-button--hover-armed');
+    node.classList.add('menu-button--active', 'menu-button--dragging');
   });
 
   node.addEventListener('dragover', (event) => {
@@ -566,6 +576,8 @@ function renderMenuButton(state, category, index) {
     node.classList.add(after ? 'menu-button--drop-after' : 'menu-button--drop-before');
   });
 
+  // Fires on the drop target, so the dragged category is the tracked one, not
+  // this handler's own.
   node.addEventListener('drop', (event) => {
     event.preventDefault();
     const id = draggingCategoryId;
@@ -574,18 +586,35 @@ function renderMenuButton(state, category, index) {
     clearCategoryDropMarkers();
     draggingCategoryId = null;
     categoryDropTarget = null;
+    if (!id) return;
 
-    if (id && target !== null) reorderCategories(id, target);
+    if (target !== null) reorderCategories(id, target);
+    commitDragSelection(id);
   });
 
+  // Fires on the source. Reordering on drop re-renders and may take this node
+  // with it, so the selection is committed in both places - whichever runs
+  // first wins and the other is a no-op.
   node.addEventListener('dragend', () => {
     clearCategoryDropMarkers();
     node.classList.remove('menu-button--dragging');
     draggingCategoryId = null;
     categoryDropTarget = null;
+    commitDragSelection(category.id);
   });
 
   return node;
+}
+
+// A drag selects the category it moved. Kept separate from activateCategory
+// because the hover state was already disarmed at dragstart and must stay so:
+// the close button should not reappear under the cursor that just dropped.
+function commitDragSelection(id) {
+  const state = getState();
+  if (!state.categories[id] || state.ui.activeCategory === id) return;
+
+  clearSelection();
+  setActiveCategory(id);
 }
 
 function activateCategory(id) {
