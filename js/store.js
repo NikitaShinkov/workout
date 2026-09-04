@@ -1,8 +1,16 @@
 // Application state: a single object, mutated only through `update`, which
 // persists and notifies subscribers.
 
-import { CATEGORIES, DEFAULT_EQUIPMENT, createCategoryState } from './model.js';
+import {
+  DEFAULT_CATEGORIES,
+  NEW_CATEGORY_NAME,
+  DEFAULT_EQUIPMENT,
+  createCategoryState,
+  uid,
+} from './model.js';
 import { loadState, saveState } from './db.js';
+
+const STATE_VERSION = 2;
 
 const listeners = new Set();
 let saveTimer = null;
@@ -11,16 +19,24 @@ let state = createInitialState();
 
 function createInitialState() {
   const categories = {};
-  for (const category of CATEGORIES) categories[category.id] = createCategoryState();
+  const categoryOrder = [];
+
+  for (const seed of DEFAULT_CATEGORIES) {
+    categories[seed.id] = createCategoryState(seed.name);
+    categoryOrder.push(seed.id);
+  }
 
   return {
-    version: 1,
+    version: STATE_VERSION,
+    // Order is held separately so categories can be reordered and deleted
+    // without depending on object key order.
+    categoryOrder,
     categories,
     // Equipment chosen for the most recently added exercise. The next new
     // exercise starts pre-ticked with this, per the spec.
     lastEquipment: DEFAULT_EQUIPMENT.slice(),
     ui: {
-      activeCategory: CATEGORIES[0].id,
+      activeCategory: categoryOrder[0],
       showIndicators: false,
       showFavorites: false,
       onlyEnabledComplexes: false,
@@ -30,7 +46,7 @@ function createInitialState() {
 }
 
 // Fill in anything a stored record predates, so an old save never crashes a
-// newer build.
+// newer build. Version 1 had no category order and no category names.
 function migrate(stored) {
   const base = createInitialState();
   if (!stored || typeof stored !== 'object') return base;
@@ -38,17 +54,44 @@ function migrate(stored) {
   const merged = {
     ...base,
     ...stored,
+    version: STATE_VERSION,
     ui: { ...base.ui, ...(stored.ui || {}) },
-    categories: { ...base.categories },
   };
 
-  for (const category of CATEGORIES) {
-    const saved = (stored.categories || {})[category.id];
-    if (saved) merged.categories[category.id] = { ...createCategoryState(), ...saved };
+  const savedCategories = stored.categories || {};
+  const savedIds = Object.keys(savedCategories);
+
+  if (savedIds.length === 0) {
+    merged.categories = base.categories;
+    merged.categoryOrder = base.categoryOrder;
+  } else {
+    // Prefer the stored order; fall back to the seed order for known ids, then
+    // append anything else that was saved.
+    const order = Array.isArray(stored.categoryOrder)
+      ? stored.categoryOrder.filter((id) => savedIds.includes(id))
+      : DEFAULT_CATEGORIES.map((c) => c.id).filter((id) => savedIds.includes(id));
+
+    for (const id of savedIds) if (!order.includes(id)) order.push(id);
+
+    const categories = {};
+    for (const id of order) {
+      const saved = savedCategories[id] || {};
+      const seed = DEFAULT_CATEGORIES.find((c) => c.id === id);
+      categories[id] = { ...createCategoryState(), ...saved };
+      // Version 1 stored no name; recover it from the seed list.
+      categories[id].name = saved.name || (seed && seed.name) || NEW_CATEGORY_NAME;
+    }
+
+    merged.categories = categories;
+    merged.categoryOrder = order;
   }
 
   if (!Array.isArray(merged.lastEquipment) || merged.lastEquipment.length === 0) {
     merged.lastEquipment = DEFAULT_EQUIPMENT.slice();
+  }
+
+  if (!merged.categories[merged.ui.activeCategory]) {
+    merged.ui.activeCategory = merged.categoryOrder[0] || null;
   }
 
   return merged;
@@ -63,8 +106,13 @@ export function getState() {
   return state;
 }
 
+// May be null: the user can delete every category.
 export function activeCategory() {
-  return state.categories[state.ui.activeCategory];
+  return state.categories[state.ui.activeCategory] || null;
+}
+
+export function categoryList() {
+  return state.categoryOrder.map((id) => ({ id, ...state.categories[id] }));
 }
 
 export function subscribe(listener) {
@@ -86,22 +134,66 @@ export function update(mutator) {
   }, 150);
 }
 
+// --- category operations ---------------------------------------------------
+
+export function addCategory(name = NEW_CATEGORY_NAME) {
+  const id = uid('cat');
+  update((draft) => {
+    draft.categories[id] = createCategoryState(name);
+    draft.categoryOrder.push(id);
+    draft.ui.activeCategory = id;
+  });
+  return id;
+}
+
+export function renameCategory(id, name) {
+  const clean = String(name).trim();
+  // An empty name would leave an unclickable button, so it keeps the old one.
+  if (!clean) return false;
+
+  update((draft) => {
+    if (draft.categories[id]) draft.categories[id].name = clean;
+  });
+  return true;
+}
+
+export function deleteCategory(id) {
+  update((draft) => {
+    const index = draft.categoryOrder.indexOf(id);
+    if (index === -1) return;
+
+    draft.categoryOrder.splice(index, 1);
+    delete draft.categories[id];
+
+    if (draft.ui.activeCategory === id) {
+      // The next category takes over; deleting the last one falls back to the
+      // previous, and deleting the only one leaves nothing selected.
+      draft.ui.activeCategory =
+        draft.categoryOrder[index] || draft.categoryOrder[index - 1] || null;
+    }
+  });
+}
+
 // --- exercise operations ---------------------------------------------------
 
 export function addExercise(exercise) {
   update((draft) => {
-    draft.categories[draft.ui.activeCategory].exercises.push(exercise);
+    const category = draft.categories[draft.ui.activeCategory];
+    if (!category) return;
+    category.exercises.push(exercise);
     draft.lastEquipment = exercise.equipment.slice();
   });
 }
 
 export function updateExercise(id, fields) {
   update((draft) => {
-    const list = draft.categories[draft.ui.activeCategory].exercises;
-    const index = list.findIndex((e) => e.id === id);
+    const category = draft.categories[draft.ui.activeCategory];
+    if (!category) return;
+
+    const index = category.exercises.findIndex((e) => e.id === id);
     if (index === -1) return;
 
-    list[index] = { ...list[index], ...fields };
+    category.exercises[index] = { ...category.exercises[index], ...fields };
     if (fields.equipment) draft.lastEquipment = fields.equipment.slice();
   });
 }
@@ -110,6 +202,7 @@ export function deleteExercises(ids) {
   const doomed = new Set(ids);
   update((draft) => {
     const category = draft.categories[draft.ui.activeCategory];
+    if (!category) return;
     category.exercises = category.exercises.filter((e) => !doomed.has(e.id));
   });
 }
@@ -121,8 +214,9 @@ export function reorderExercises(ids, insertIndex) {
 
   update((draft) => {
     const category = draft.categories[draft.ui.activeCategory];
-    const list = category.exercises;
+    if (!category) return;
 
+    const list = category.exercises;
     const picked = list.filter((e) => moving.has(e.id));
     if (picked.length === 0) return;
 
@@ -138,7 +232,9 @@ export function reorderExercises(ids, insertIndex) {
 
 export function toggleFavorite(id) {
   update((draft) => {
-    const exercise = draft.categories[draft.ui.activeCategory].exercises.find((e) => e.id === id);
+    const category = draft.categories[draft.ui.activeCategory];
+    if (!category) return;
+    const exercise = category.exercises.find((e) => e.id === id);
     if (exercise) exercise.favorite = !exercise.favorite;
   });
 }
@@ -152,5 +248,8 @@ export function setUiFlag(flag, value) {
 }
 
 export function setCategoryField(field, value) {
-  update((draft) => { draft.categories[draft.ui.activeCategory][field] = value; });
+  update((draft) => {
+    const category = draft.categories[draft.ui.activeCategory];
+    if (category) category[field] = value;
+  });
 }

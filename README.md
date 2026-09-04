@@ -17,7 +17,10 @@ loading over `file://`. Opening the file directly will show a blank page.
 
 Stage 1 — the Schedule page and the "add exercise" popup:
 
-- Seven fixed categories; clicking one switches the page in the same tab.
+- Categories: click to switch (same tab), double-click to rename in place
+  (Enter or a click outside saves, Esc cancels), hover the active one and click
+  the X to delete it, and **+** adds one that opens straight into renaming.
+  The button width holds steady while renaming and follows the saved name.
 - **Add exercise** (in the exercise toolbar, or below the header when the
   category is empty) opens the system file picker, then the popup.
 - Popup: animated preview of all images cycling at 0.4s, thumbnails in rows of
@@ -31,9 +34,11 @@ Stage 1 — the Schedule page and the "add exercise" popup:
   favourite flag.
 - Everything is persisted in the browser (IndexedDB) and survives a reload.
 
+Keyboard: `Ctrl+D` starts a new exercise, `Del` deletes the selected rows,
+`Enter` saves in the popup and `Ctrl+Enter` adds a line break there.
+
 Not built yet, by design: workout complexes, schedule calculation, the two
-`view_options` filter checkboxes, adding or deleting categories, feedback
-capture, and the workout page.
+`view_options` filter checkboxes, feedback capture, and the workout page.
 
 ## Layout
 

@@ -1,6 +1,6 @@
 // Schedule page rendering and interaction.
 
-import { CATEGORIES, INDICATORS, createExercise } from './model.js';
+import { INDICATORS, createExercise } from './model.js';
 import { el, svg, clear } from './dom.js';
 import { blobUrl, filesToImageBlobs } from './images.js';
 import { createSequenceAnimation } from './animation.js';
@@ -8,6 +8,7 @@ import { openExerciseModal, isModalOpen } from './exercise-modal.js';
 import {
   getState,
   activeCategory,
+  categoryList,
   subscribe,
   addExercise,
   updateExercise,
@@ -17,6 +18,9 @@ import {
   setActiveCategory,
   setUiFlag,
   setCategoryField,
+  addCategory,
+  renameCategory,
+  deleteCategory,
 } from './store.js';
 
 // Exact path data from the exported Favorites asset. It is inlined rather than
@@ -54,6 +58,9 @@ const INDICATOR_SLOTS = 5;
 let selectedIds = new Set();
 let anchorIndex = null;
 
+// Id of the category whose name is being edited inline, if any.
+let editingCategoryId = null;
+
 // Row drag state.
 let draggingIds = null;
 let rowDropTarget = null;
@@ -87,6 +94,8 @@ export function mountSchedulePage(container) {
 // --- add / edit flow -------------------------------------------------------
 
 function startAddExercise() {
+  // Nothing to add an exercise to if every category has been deleted.
+  if (!activeCategory()) return;
   // Adding always begins with the system file picker, per the spec.
   pagePicker.click();
 }
@@ -116,7 +125,9 @@ function startEditExercise(exercise) {
 // --- selection -------------------------------------------------------------
 
 function onExerciseClick(event, index) {
-  const exercises = activeCategory().exercises;
+  const category = activeCategory();
+  if (!category) return;
+  const exercises = category.exercises;
 
   if (event.shiftKey && anchorIndex !== null) {
     // Shift: select the range between the anchor and this row.
@@ -146,6 +157,8 @@ function clearSelection() {
 // including empty space inside the list itself.
 function onDocumentClick(event) {
   if (isModalOpen()) return;
+  // Re-rendering here would tear the name input out from under the caret.
+  if (editingCategoryId !== null) return;
   if (selectedIds.size === 0) return;
 
   const target = event.target;
@@ -286,24 +299,22 @@ function render() {
   const category = activeCategory();
 
   // Drop selections that no longer exist (after a delete or category switch).
-  const liveIds = new Set(category.exercises.map((e) => e.id));
+  const liveIds = new Set(category ? category.exercises.map((e) => e.id) : []);
   for (const id of Array.from(selectedIds)) if (!liveIds.has(id)) selectedIds.delete(id);
 
   stopAllRowAnimations();
   clear(root);
 
-  const hasExercises = category.exercises.length > 0;
+  // Every category can be deleted, in which case there is nothing below the
+  // header but the button to add one.
+  let body = null;
+  if (category) {
+    body = category.exercises.length
+      ? renderMain(state, category)
+      : el('div', { class: 'empty-state' }, renderAddButton('Добавить упражнение'));
+  }
 
-  root.appendChild(
-    el(
-      'div',
-      { class: 'page' },
-      renderHeader(state),
-      hasExercises
-        ? renderMain(state, category)
-        : el('div', { class: 'empty-state' }, renderAddButton('Добавить упражнение'))
-    )
-  );
+  root.appendChild(el('div', { class: 'page' }, renderHeader(state), body));
 }
 
 function renderHeader(state) {
@@ -316,30 +327,144 @@ function renderHeader(state) {
       el(
         'div',
         { class: 'category-list' },
-        CATEGORIES.map((category) =>
-          el('button', {
-            class:
-              'menu-button' +
-              (category.id === state.ui.activeCategory ? ' menu-button--active' : ''),
-            type: 'button',
-            text: category.name,
-            onClick: () => {
-              clearSelection();
-              setActiveCategory(category.id);
-            },
-          })
-        )
+        categoryList().map((category) => renderMenuButton(state, category))
       ),
-      // Adding categories is out of scope for this stage; the control is shown
-      // because the layout has it, but it is inert.
-      el('img', {
+      el('button', {
         class: 'add-category-button',
-        src: 'assets/icons/add-category.svg',
-        alt: 'Добавить категорию',
+        type: 'button',
+        title: 'Добавить категорию',
+        'aria-label': 'Добавить категорию',
+        onClick: () => {
+          clearSelection();
+          // A new category opens straight into name editing, per the prototype.
+          startEditingCategory(addCategory());
+        },
       })
     ),
     renderViewOptions(state)
   );
+}
+
+// --- category buttons ------------------------------------------------------
+
+function startEditingCategory(id) {
+  editingCategoryId = id;
+  render();
+
+  const input = root.querySelector('.menu-button__input');
+  if (!input) return;
+  // select() highlights the whole name and leaves the caret at the end.
+  input.focus();
+  input.select();
+}
+
+function renderMenuButton(state, category) {
+  const isActive = category.id === state.ui.activeCategory;
+  const isEditing = category.id === editingCategoryId;
+
+  // In flow but invisible, so it - and only it - sets the button's width. That
+  // is what keeps the width fixed when the close button appears on hover and
+  // while a longer or shorter name is being typed. It always carries the saved
+  // name, so after saving the width follows the new name.
+  const sizer = el('span', { class: 'menu-button__sizer', text: category.name });
+
+  if (isEditing) {
+    return el(
+      'div',
+      { class: 'menu-button menu-button--active menu-button--editing' },
+      sizer,
+      renderCategoryNameInput(category)
+    );
+  }
+
+  const children = [
+    sizer,
+    el('span', { class: 'menu-button__label', text: category.name }),
+  ];
+
+  if (isActive) {
+    children.push(
+      el(
+        'button',
+        {
+          class: 'menu-button__close',
+          type: 'button',
+          title: 'Удалить категорию',
+          'aria-label': 'Удалить категорию',
+          onClick: (event) => {
+            event.stopPropagation(); // do not also re-select the category
+            clearSelection();
+            deleteCategory(category.id);
+          },
+        },
+        el('img', { class: 'menu-button__close-icon', src: 'assets/icons/close.svg', alt: '' })
+      )
+    );
+  }
+
+  // A div rather than a <button>: this element hosts a nested button (close)
+  // and, while editing, an <input> - neither is valid inside a button.
+  return el(
+    'div',
+    {
+      class: 'menu-button' + (isActive ? ' menu-button--active' : ''),
+      role: 'button',
+      tabindex: '0',
+      onClick: () => {
+        clearSelection();
+        setActiveCategory(category.id);
+      },
+      onDblclick: () => startEditingCategory(category.id),
+      onKeydown: (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          clearSelection();
+          setActiveCategory(category.id);
+        }
+      },
+    },
+    children
+  );
+}
+
+function renderCategoryNameInput(category) {
+  const input = el('input', {
+    class: 'menu-button__input',
+    type: 'text',
+    value: category.name,
+    spellcheck: 'false',
+  });
+
+  let settled = false;
+
+  function finish(save) {
+    if (settled) return;
+    settled = true;
+    editingCategoryId = null;
+
+    // renameCategory re-renders on success; otherwise render to leave the
+    // editing state behind.
+    const renamed = save && renameCategory(category.id, input.value);
+    if (!renamed) render();
+  }
+
+  input.addEventListener('keydown', (event) => {
+    // Keep Enter, Esc, Delete and Ctrl+D from reaching the page shortcuts.
+    event.stopPropagation();
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      finish(true);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      finish(false); // cancel: the old name stays
+    }
+  });
+
+  // Clicking anywhere outside the button commits, same as Enter.
+  input.addEventListener('blur', () => finish(true));
+
+  return input;
 }
 
 function renderViewOptions(state) {

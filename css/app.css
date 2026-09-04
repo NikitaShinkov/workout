@@ -125,6 +125,7 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
 }
 
 .menu-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   height: 24px;
@@ -135,18 +136,115 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   color: var(--text);
   white-space: nowrap;
   cursor: pointer;
+  overflow: hidden;
 }
 
-.menu-button--active {
+.menu-button--active,
+.menu-button--editing {
   background: #ffffff;
   color: #000000;
 }
 
-.add-category-button {
+/* Invisible, but the only child in flow - so it alone sets the button's width.
+   That is what holds the width steady when the close button appears on hover
+   and while a longer or shorter name is being typed. It always carries the
+   saved name, so once a rename is committed the width follows the new name. */
+.menu-button__sizer {
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+/* Taken out of flow so it can be clipped without affecting the width.
+   Must stay a BLOCK box: text-overflow: ellipsis has no effect on a flex
+   container, whose text lives in an anonymous flex item - it clips mid-glyph
+   instead. So it is centred by line-height rather than by align-items. */
+.menu-button__label {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 0;
+  bottom: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 24px;
+  /* Standard trim: this box is centred by its line height, so it feeds no gap,
+     and the cap/alphabetic edges would clip diacritics and descenders. */
+  text-box: normal;
+}
+
+/* Make room for the close button by narrowing the text, not the button. */
+.menu-button--active:hover .menu-button__label {
+  right: 26px;
+}
+
+.menu-button__close {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  background: #565656;
+  cursor: pointer;
+}
+
+.menu-button--active:hover .menu-button__close {
+  display: flex;
+}
+
+.menu-button__close-icon {
   display: block;
+  width: 8px;
+  height: 8px;
+}
+
+/* Editing the category name in place. */
+.menu-button--editing {
+  cursor: text;
+}
+
+.menu-button__input {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  /* The 2px inset matches the design's py-2, which is the height of the
+     selection band behind the text. */
+  top: 2px;
+  bottom: 2px;
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #000000;
+  caret-color: #000000;
+  outline: none;
+}
+
+.menu-button__input::selection {
+  background: var(--active);
+  color: #ffffff;
+}
+
+.add-category-button {
   width: 27px;
   height: 24px;
   flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background: transparent url("../assets/icons/add-category.svg") center / 27px 24px no-repeat;
+}
+
+/* Pressed state: Add_category_button_active. */
+.add-category-button:active {
+  background-image: url("../assets/icons/add-category-active.svg");
 }
 
 /* ---------- view options ---------- */

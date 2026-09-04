@@ -1,6 +1,8 @@
 // Fixed domain data and factories. No DOM, no storage.
 
-export const CATEGORIES = [
+// Seed categories. These are only used to build a fresh state - once saved,
+// categories are ordinary data the user can rename, add to and delete.
+export const DEFAULT_CATEGORIES = [
   { id: 'ankle',      name: 'Голеностоп' },
   { id: 'knee',       name: 'Колено' },
   { id: 'hip',        name: 'ТБС' },
@@ -9,6 +11,8 @@ export const CATEGORIES = [
   { id: 'back',       name: 'Спина' },
   { id: 'neck',       name: 'Шея' },
 ];
+
+export const NEW_CATEGORY_NAME = 'Новая категория';
 
 // Fixed equipment list. `mat` is the default selection for a brand new exercise.
 export const EQUIPMENT = [
@@ -64,8 +68,9 @@ export function createExercise(fields = {}) {
   };
 }
 
-export function createCategoryState() {
+export function createCategoryState(name = NEW_CATEGORY_NAME) {
   return {
+    name,
     exercises: [],
     complexes: [],                 // reserved for the next iteration
     scheduleEnabled: true,
