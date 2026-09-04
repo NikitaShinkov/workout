@@ -550,16 +550,25 @@ function renderMenuButton(state, category, index) {
     event.dataTransfer.setData('text/plain', category.id);
     event.dataTransfer.effectAllowed = 'move';
 
-    // Dragging puts the button into the plain active state: selected, with the
-    // close button gone and the full name showing. The classes are applied by
-    // hand because a re-render here would replace the node being dragged and
-    // abort the gesture - the selection itself is committed on drop/dragend.
+    // The browser snapshots the drag image from this element synchronously,
+    // right now - so the active look has to be on for that snapshot: the button
+    // travels with the cursor in the active state, close button gone and full
+    // name showing. Classes are set by hand because a re-render here would
+    // replace the node being dragged; the selection is committed on drop.
     activeHoverArmed = false;
     for (const other of root.querySelectorAll('.menu-button--active')) {
       other.classList.remove('menu-button--active', 'menu-button--hover-armed');
     }
     node.classList.remove('menu-button--hover-armed');
-    node.classList.add('menu-button--active', 'menu-button--dragging');
+    node.classList.add('menu-button--active');
+
+    // By the time this runs the snapshot has been taken, so the button left
+    // behind in its old position can drop the active look without changing what
+    // is being dragged. No button in the list shows as active mid-drag.
+    setTimeout(() => {
+      node.classList.remove('menu-button--active');
+      node.classList.add('menu-button--dragging');
+    }, 0);
   });
 
   node.addEventListener('dragover', (event) => {

@@ -201,10 +201,9 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   display: flex;
 }
 
-/* Dragging a category to reorder it. */
-.menu-button--dragging {
-  opacity: 0.4;
-}
+/* Dragging a category to reorder it. The button that stays behind in the list
+   is left looking like any inactive one - deliberately no opacity change, since
+   what the cursor carries is the active-looking drag image. */
 
 .menu-button--drop-before {
   box-shadow: inset 2px 0 0 0 var(--active);
