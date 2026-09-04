@@ -1,0 +1,11 @@
+# Dependencies (the app itself has none; this guards against stray installs)
+node_modules/
+
+# OS / editor cruft
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+
+# Local scratch
+*.log

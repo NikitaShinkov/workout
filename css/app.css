@@ -1,0 +1,743 @@
+/* Schedule page styles.
+   Figma: file ULWMwUv9ivvkRUaHA1JikX. Values are the design's own px numbers.
+   Design tokens (Figma variables) are the custom properties below. */
+
+:root {
+  --bg: #0a0a0b;
+  --hover-bg: #1d1d1d;
+  --stroke: #525252;
+  --hard: #ff453a;
+  --avr: #ffd60a;
+  --easy: #32d74b;
+  --active: #478cf6;
+  --not-selected: #5b5b62;
+  --text: #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+}
+
+/* The viewport height is handed down by an unbroken flex chain rather than by
+   percentage heights: a percentage height against an auto-height ancestor
+   resolves to auto, which silently collapsed `.main` (flex-basis 0) to zero
+   height and hid the columns behind its `overflow: hidden`. */
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  /* Body / Header text styles are both Inter 12px; weight is the difference. */
+  font-family: Inter, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 12px;
+  line-height: normal;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, textarea {
+  font-family: inherit;
+  font-size: 12px;
+  line-height: normal;
+  color: var(--text);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------- page shell ---------- */
+
+#app {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 24px;
+  padding-top: 16px;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-left: 16px;
+  flex-shrink: 0;
+}
+
+.empty-state {
+  display: flex;
+  padding: 0 16px;
+}
+
+/* Two equal fluid columns. They stay side by side at every width - the 960px
+   layout in Figma is the same arrangement, just narrower. */
+.main {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.column {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ---------- categories ---------- */
+
+.categories {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.category-list {
+  display: flex;
+  align-items: center;
+}
+
+.menu-button {
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.menu-button--active {
+  background: #ffffff;
+  color: #000000;
+}
+
+.add-category-button {
+  display: block;
+  width: 27px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+/* ---------- view options ---------- */
+
+.view-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 6px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: var(--hover-bg);
+  cursor: pointer;
+}
+
+.icon-button--active {
+  background: #ffffff;
+  border-color: #ffffff;
+}
+
+.icon-button__icon {
+  display: block;
+  width: 17px;
+  height: 16px;
+}
+
+.indicator-swatch {
+  display: flex;
+  width: 28px;
+  height: 9px;
+}
+
+.indicator-swatch__cell {
+  flex: 1 0 0;
+  min-width: 1px;
+  height: 100%;
+}
+
+/* ---------- checkbox ---------- */
+
+.checkbox-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  width: 100%;
+}
+
+.checkbox-line--inline {
+  width: auto;
+  white-space: nowrap;
+}
+
+/* Kept in the DOM (not display:none) so it stays keyboard focusable. */
+.checkbox__input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  margin: 0;
+  opacity: 0;
+}
+
+.checkbox {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 0.5px solid var(--stroke);
+  border-radius: 3.5px;
+  background: var(--hover-bg);
+  background-size: 14px 14px;
+  background-repeat: no-repeat;
+}
+
+/* The checked asset carries its own blue rounded background, so the border
+   would otherwise double up around it. */
+.checkbox__input:checked + .checkbox {
+  border-color: transparent;
+  background-image: url("../assets/icons/checkbox-check.svg");
+}
+
+.checkbox__input:focus-visible + .checkbox {
+  outline: 1px solid var(--active);
+  outline-offset: 1px;
+}
+
+.checkbox-line__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- toolbars ---------- */
+
+.schedule-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+
+.exercise-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding-left: 10px;
+  padding-right: 16px;
+  flex-shrink: 0;
+}
+
+.toolbar-label {
+  white-space: nowrap;
+}
+
+/* ---------- switch ---------- */
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.switch__input {
+  position: absolute;
+  width: 0;
+  height: 0;
+  margin: 0;
+  opacity: 0;
+}
+
+.switch__track {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--stroke);
+  border-radius: 100px;
+  background: var(--hover-bg);
+}
+
+.switch__track::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 25px;
+  height: 16px;
+  border-radius: 100px;
+  background: #ffffff;
+  transform: translateY(-50%);
+  transition: left 120ms ease;
+}
+
+.switch__input:checked + .switch__track {
+  background: var(--active);
+  border-color: var(--active);
+}
+
+/* 40px inner width - 25px knob - 2px inset = 13px */
+.switch__input:checked + .switch__track::after {
+  left: 13px;
+}
+
+.switch__input:focus-visible + .switch__track {
+  outline: 1px solid var(--active);
+  outline-offset: 2px;
+}
+
+/* ---------- inputs ---------- */
+
+.input {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: var(--hover-bg);
+  outline: none;
+}
+
+.input:focus {
+  border-color: var(--active);
+}
+
+.input--date {
+  width: 56px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.input--interval {
+  width: 29px;
+  padding: 0 4px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.input--text {
+  flex: 1 0 0;
+  min-width: 0;
+}
+
+.input--textarea {
+  flex: 1 0 0;
+  min-width: 0;
+  height: 100px;
+  padding: 6px;
+  resize: none;
+}
+
+/* ---------- main button ---------- */
+
+.main-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--active);
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.main-button__icon {
+  display: block;
+  width: 13px;
+  height: 12px;
+}
+
+/* ---------- exercise list ---------- */
+
+.exercise-list,
+.complex-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.exercise-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exercise-row {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  height: 58px;
+  padding: 4px 10px;
+  overflow: hidden;
+  flex-shrink: 0;
+  cursor: default;
+  user-select: none;
+}
+
+.exercise-row:hover,
+.exercise-row--selected {
+  background: var(--hover-bg);
+}
+
+.exercise-row__description {
+  display: flex;
+  flex: 1 0 0;
+  min-width: 0;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.exercise-row__text-image {
+  display: flex;
+  flex: 1 0 0;
+  min-width: 0;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.exercise-row__image {
+  display: block;
+  width: 89px;
+  height: 50px;
+  flex-shrink: 0;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.exercise-row__image--empty {
+  background: var(--not-selected);
+}
+
+.exercise-row__titles {
+  display: flex;
+  flex: 1 0 0;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  align-self: stretch;
+}
+
+.exercise-row__title {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.exercise-row__subtitle {
+  margin: 0;
+  flex: 1 0 0;
+  min-height: 0;
+  font-weight: 400;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ---------- indicators ---------- */
+
+.indicators {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.indicator__label {
+  width: 35px;
+  flex-shrink: 0;
+}
+
+.color-line {
+  display: flex;
+  width: 40px;
+  height: 9px;
+  flex-shrink: 0;
+}
+
+.color-line__cell {
+  flex: 1 0 0;
+  min-width: 1px;
+  height: 100%;
+}
+
+/* ---------- favorite star ---------- */
+
+.favorite-star {
+  width: 23px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: none;
+  flex-shrink: 0;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.favorite-star__icon {
+  display: block;
+  width: 23px;
+  height: 22px;
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 1;
+}
+
+.favorite-star--active .favorite-star__icon {
+  fill: #ffffff;
+}
+
+/* ---------- modal ---------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 0A0A0B at 50% */
+  background: rgba(10, 10, 11, 0.5);
+  /* Ten images make the popup taller than a short laptop screen. */
+  overflow: auto;
+  padding: 20px 0;
+}
+
+.popup {
+  width: 600px;
+  flex-shrink: 0;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  align-items: flex-end;
+  padding: 20px 20px 32px;
+  border: 1px solid var(--stroke);
+  border-radius: 7px;
+  /* The Figma frame leaves this transparent; making it opaque stops the dimmed
+     page behind from showing through the form. */
+  background: var(--bg);
+}
+
+.popup__form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.popup__title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.popup__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.field {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  width: 100%;
+}
+
+.field--inline {
+  align-items: center;
+}
+
+.field__label {
+  width: 70px;
+  flex-shrink: 0;
+}
+
+.field__label--textarea {
+  padding-top: 8px;
+}
+
+.field__label--equipment {
+  padding-top: 3px;
+}
+
+/* ---------- images block ---------- */
+
+.images-block {
+  display: flex;
+  flex: 1 0 0;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.animation-preview {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 52 / 29;
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  background: var(--not-selected);
+  overflow: hidden;
+}
+
+.seq-anim__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Lines sit 8px apart, matching Images_block's own gap. */
+.images-preview-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.images-preview-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+}
+
+.image-thumb {
+  position: relative;
+  flex: 1 0 0;
+  min-width: 0;
+  aspect-ratio: 52 / 29;
+  border: 1px solid var(--stroke);
+  border-radius: 4px;
+  background: var(--not-selected);
+  overflow: hidden;
+  cursor: grab;
+}
+
+.image-thumb__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Invisible but still occupying a slot - this is what keeps every thumbnail a
+   quarter of the row wide, exactly as `reserved_space` does in Figma. It stays
+   hit-testable so a drop onto it appends to the end. */
+.image-thumb--reserved {
+  opacity: 0;
+  cursor: default;
+}
+
+.image-thumb--dragging {
+  opacity: 0.4;
+}
+
+.image-thumb--drop-before {
+  box-shadow: inset 2px 0 0 0 var(--active);
+}
+
+.image-thumb--drop-after {
+  box-shadow: inset -2px 0 0 0 var(--active);
+}
+
+.change-image-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.change-image-button__icon {
+  display: block;
+  width: 16px;
+  height: 14px;
+}
+
+.equipment-options {
+  display: flex;
+  flex: 1 0 0;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+/* ---------- scrollbars (the 8px `scroll` element in the design) ---------- */
+
+.exercise-list::-webkit-scrollbar,
+.complex-list::-webkit-scrollbar,
+.overlay::-webkit-scrollbar {
+  width: 8px;
+}
+
+.exercise-list::-webkit-scrollbar-track,
+.complex-list::-webkit-scrollbar-track,
+.overlay::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.exercise-list::-webkit-scrollbar-thumb,
+.complex-list::-webkit-scrollbar-thumb,
+.overlay::-webkit-scrollbar-thumb {
+  background: var(--not-selected);
+  border-radius: 4px;
+}
+
+.exercise-list,
+.complex-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--not-selected) transparent;
+}
