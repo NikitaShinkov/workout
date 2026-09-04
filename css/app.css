@@ -240,11 +240,17 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   outline-offset: 1px;
 }
 
+/* Standard trim, not the cap-height trim used elsewhere: the cap edge cuts
+   diacritics off the top (ё) and the alphabetic edge cuts descenders off the
+   bottom (у, р, д), and this element clips its overflow. The trim is only
+   needed where a box's height feeds a gap; here the label is centred in a flex
+   row, so its height affects nothing but its own centring. */
 .checkbox-line__label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-box: normal;
 }
 
 /* ---------- toolbars ---------- */
