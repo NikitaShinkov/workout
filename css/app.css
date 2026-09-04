@@ -490,22 +490,43 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   align-self: stretch;
 }
 
+/* Cap-height trim puts the box's top edge exactly at cap height, so diacritics
+   that rise above it (the breve on Й, the dots on Ё) land outside the element's
+   own overflow clip and get shaved off.
+   The fix is 4px of padding to widen the clip, plus an equal negative margin so
+   the trimmed alignment and the 8px gap are unchanged. The padding and the
+   margin must be on different elements wherever a parent also clips: putting
+   both on the child pushes its padding above the parent, which then clips away
+   the very headroom the padding just created. */
 .exercise-row__title {
-  margin: 0;
+  padding-top: 4px;
+  margin: -4px 0 0;
   font-weight: 700;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* This wrapper is the flex item, not the paragraph: flex blockifies
+   `display: -webkit-box`, which silently discards -webkit-line-clamp and lets
+   the text overflow and be cut mid-line instead of clamping with an ellipsis.
+   It carries the negative margin for the paragraph's padding. */
+.exercise-row__subtitle-box {
+  flex: 1 1 0;
+  min-height: 0;
+  margin-top: -4px;
+  overflow: hidden;
 }
 
 .exercise-row__subtitle {
   margin: 0;
-  flex: 1 0 0;
-  min-height: 0;
+  padding-top: 4px;
   font-weight: 400;
   overflow: hidden;
   overflow-wrap: anywhere;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 /* ---------- indicators ---------- */

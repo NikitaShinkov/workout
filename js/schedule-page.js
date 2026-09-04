@@ -532,7 +532,13 @@ function renderExerciseRow(state, exercise, index) {
           'div',
           { class: 'exercise-row__titles' },
           el('p', { class: 'exercise-row__title', text: exercise.name }),
-          el('p', { class: 'exercise-row__subtitle', text: exercise.description })
+          // The paragraph is wrapped so it is not itself a flex item - see the
+          // note on .exercise-row__subtitle-box in the stylesheet.
+          el(
+            'div',
+            { class: 'exercise-row__subtitle-box' },
+            el('p', { class: 'exercise-row__subtitle', text: exercise.description })
+          )
         )
       ),
       state.ui.showIndicators ? renderIndicators(exercise) : null
