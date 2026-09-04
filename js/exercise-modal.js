@@ -295,13 +295,28 @@ export function openExerciseModal(options) {
 
   submitButton.addEventListener('click', submit);
 
-  // Enter submits; Ctrl+Enter is how you get a line break in the description.
-  popup.addEventListener('keydown', (event) => {
+  // A click outside the popup cancels. Using mousedown would fire mid
+  // text-selection drag, so this listens for a click landing on the overlay.
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) closeModal();
+  });
+
+  // Bound to the document, not the popup: with no field focused the event
+  // target is <body>, which is outside the popup, so a popup-level listener
+  // would never see the keypress.
+  function onKeydown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+
     if (event.key !== 'Enter') return;
 
     // Enter on a focused button activates that button, as usual.
-    if (event.target.tagName === 'BUTTON') return;
+    if (event.target && event.target.tagName === 'BUTTON') return;
 
+    // Ctrl+Enter is how you get a line break in the description.
     if (event.ctrlKey || event.metaKey) {
       if (event.target === descriptionInput) {
         event.preventDefault();
@@ -313,19 +328,6 @@ export function openExerciseModal(options) {
 
     event.preventDefault();
     submit();
-  });
-
-  // A click outside the popup cancels. Using mousedown would fire mid
-  // text-selection drag, so this listens for a click landing on the overlay.
-  overlay.addEventListener('click', (event) => {
-    if (event.target === overlay) closeModal();
-  });
-
-  function onKeydown(event) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeModal();
-    }
   }
 
   document.addEventListener('keydown', onKeydown);

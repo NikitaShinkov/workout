@@ -142,13 +142,14 @@ function clearSelection() {
   anchorIndex = null;
 }
 
-// A left click anywhere outside the exercise list drops the selection.
+// A left click on anything that is not an exercise row drops the selection -
+// including empty space inside the list itself.
 function onDocumentClick(event) {
   if (isModalOpen()) return;
   if (selectedIds.size === 0) return;
 
   const target = event.target;
-  if (target && target.closest && target.closest('.exercise-list')) return;
+  if (target && target.closest && target.closest('.exercise-row')) return;
 
   clearSelection();
   render();
@@ -159,8 +160,13 @@ function onDocumentKeydown(event) {
 
   // Ctrl+D starts a new exercise. Works from anywhere on the page, so it is
   // handled before the "ignore keys while typing" guard below.
-  if ((event.ctrlKey || event.metaKey) && (event.key === 'd' || event.key === 'D')) {
-    event.preventDefault(); // Ctrl+D is "bookmark this page" otherwise
+  //
+  // Matched on event.code (the physical key) rather than event.key: on a
+  // Russian layout the D key reports event.key === 'в', so a key-based check
+  // silently misses and Chrome's bookmark dialog wins instead.
+  if ((event.ctrlKey || event.metaKey) && event.code === 'KeyD') {
+    event.preventDefault();  // suppress "bookmark this page"
+    event.stopPropagation();
     startAddExercise();
     return;
   }
