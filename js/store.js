@@ -157,10 +157,16 @@ export function renameCategory(id, name) {
   return true;
 }
 
+// Returns what was removed, so the caller can offer an undo, or null if the id
+// was unknown.
 export function deleteCategory(id) {
+  let removed = null;
+
   update((draft) => {
     const index = draft.categoryOrder.indexOf(id);
     if (index === -1) return;
+
+    removed = { id, index, data: draft.categories[id] };
 
     draft.categoryOrder.splice(index, 1);
     delete draft.categories[id];
@@ -171,6 +177,33 @@ export function deleteCategory(id) {
       draft.ui.activeCategory =
         draft.categoryOrder[index] || draft.categoryOrder[index - 1] || null;
     }
+  });
+
+  return removed;
+}
+
+// Put back a record from deleteCategory, at the position it came from.
+export function restoreCategory(removed) {
+  if (!removed || !removed.data) return;
+
+  update((draft) => {
+    if (draft.categories[removed.id]) return; // already back
+
+    draft.categories[removed.id] = removed.data;
+    draft.categoryOrder.splice(Math.min(removed.index, draft.categoryOrder.length), 0, removed.id);
+    draft.ui.activeCategory = removed.id;
+  });
+}
+
+// Move one category so it lands at `insertIndex`, a position in the CURRENT order.
+export function reorderCategories(id, insertIndex) {
+  update((draft) => {
+    const from = draft.categoryOrder.indexOf(id);
+    if (from === -1) return;
+
+    draft.categoryOrder.splice(from, 1);
+    // Removing it first shifts every later position down by one.
+    draft.categoryOrder.splice(insertIndex > from ? insertIndex - 1 : insertIndex, 0, id);
   });
 }
 

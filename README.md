@@ -18,9 +18,14 @@ loading over `file://`. Opening the file directly will show a blank page.
 Stage 1 — the Schedule page and the "add exercise" popup:
 
 - Categories: click to switch (same tab), double-click to rename in place
-  (Enter or a click outside saves, Esc cancels), hover the active one and click
-  the X to delete it, and **+** adds one that opens straight into renaming.
-  The button width holds steady while renaming and follows the saved name.
+  (Enter or a click outside saves, Esc cancels), drag horizontally to reorder,
+  and **+** adds one that opens straight into renaming. The button width holds
+  steady while renaming and follows the saved name.
+- Deleting a category (the X on the active button) hides it and offers a 5s
+  undo, by button or `Ctrl+Z`; the countdown runs down on the button. Deleting
+  several in a row stacks them, newest first. The X only appears on the *second*
+  hover after a category is opened, so it never lands under the cursor that just
+  clicked.
 - **Add exercise** (in the exercise toolbar, or below the header when the
   category is empty) opens the system file picker, then the popup.
 - Popup: animated preview of all images cycling at 0.4s, thumbnails in rows of

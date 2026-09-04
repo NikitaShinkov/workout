@@ -173,8 +173,10 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   text-box: normal;
 }
 
-/* Make room for the close button by narrowing the text, not the button. */
-.menu-button--active:hover .menu-button__label {
+/* Make room for the close button by narrowing the text, not the button.
+   Requires --hover-armed, so the X does not appear on the hover that is only
+   still in progress because the click that opened the category just happened. */
+.menu-button--active.menu-button--hover-armed:hover .menu-button__label {
   right: 26px;
 }
 
@@ -195,8 +197,21 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   cursor: pointer;
 }
 
-.menu-button--active:hover .menu-button__close {
+.menu-button--active.menu-button--hover-armed:hover .menu-button__close {
   display: flex;
+}
+
+/* Dragging a category to reorder it. */
+.menu-button--dragging {
+  opacity: 0.4;
+}
+
+.menu-button--drop-before {
+  box-shadow: inset 2px 0 0 0 var(--active);
+}
+
+.menu-button--drop-after {
+  box-shadow: inset -2px 0 0 0 var(--active);
 }
 
 .menu-button__close-icon {
@@ -245,6 +260,33 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
 /* Pressed state: Add_category_button_active. */
 .add-category-button:active {
   background-image: url("../assets/icons/add-category-active.svg");
+}
+
+/* Undo_button - offered for 5s after a category is deleted. Empty most of the
+   time, so it takes no space in the row. */
+.undo-slot {
+  display: contents;
+}
+
+.undo-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--active);
+  white-space: nowrap;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.undo-button__icon {
+  display: block;
+  width: 12px;
+  height: 12px;
 }
 
 /* ---------- view options ---------- */

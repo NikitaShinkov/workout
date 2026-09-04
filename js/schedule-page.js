@@ -21,6 +21,8 @@ import {
   addCategory,
   renameCategory,
   deleteCategory,
+  restoreCategory,
+  reorderCategories,
 } from './store.js';
 
 // Exact path data from the exported Favorites asset. It is inlined rather than
@@ -60,6 +62,21 @@ let anchorIndex = null;
 
 // Id of the category whose name is being edited inline, if any.
 let editingCategoryId = null;
+
+// The close button appears only on the SECOND hover after a category is opened.
+// Switching category disarms it; leaving the button arms it again, so the X
+// never appears under a cursor that is only still there because it just clicked.
+let activeHoverArmed = true;
+
+// Categories awaiting permanent deletion, oldest first. Each keeps its own
+// timer, and the newest is the one the undo button offers.
+const UNDO_SECONDS = 5;
+let pendingDeletions = [];
+let undoTicker = null;
+
+// Category drag-reorder state.
+let draggingCategoryId = null;
+let categoryDropTarget = null;
 
 // Row drag state.
 let draggingIds = null;
@@ -186,6 +203,14 @@ function onDocumentKeydown(event) {
 
   const tag = event.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return; // do not eat edits in fields
+
+  // Ctrl+Z restores the most recently deleted category. Checked after the field
+  // guard above so it never steals undo from a text field.
+  if ((event.ctrlKey || event.metaKey) && event.code === 'KeyZ' && pendingDeletions.length > 0) {
+    event.preventDefault();
+    undoLastDeletion();
+    return;
+  }
 
   if (event.key === 'Delete' && selectedIds.size > 0) {
     event.preventDefault();
@@ -315,6 +340,9 @@ function render() {
   }
 
   root.appendChild(el('div', { class: 'page' }, renderHeader(state), body));
+
+  // The header was rebuilt, so the undo slot came back empty.
+  refreshUndoSlot();
 }
 
 function renderHeader(state) {
@@ -327,7 +355,7 @@ function renderHeader(state) {
       el(
         'div',
         { class: 'category-list' },
-        categoryList().map((category) => renderMenuButton(state, category))
+        categoryList().map((category, index) => renderMenuButton(state, category, index))
       ),
       el('button', {
         class: 'add-category-button',
@@ -336,12 +364,93 @@ function renderHeader(state) {
         'aria-label': 'Добавить категорию',
         onClick: () => {
           clearSelection();
+          activeHoverArmed = false;
           // A new category opens straight into name editing, per the prototype.
           startEditingCategory(addCategory());
         },
-      })
+      }),
+      // Filled in by refreshUndoSlot, which ticks once a second on its own so
+      // the countdown does not re-render the whole page.
+      el('div', { class: 'undo-slot' })
     ),
     renderViewOptions(state)
+  );
+}
+
+// --- deleting a category, with an undo window ------------------------------
+
+function requestDeleteCategory(id) {
+  // Deleting switches to the next category, and its close button would other-
+  // wise appear straight under the cursor that just clicked this one - one more
+  // click and the next category would go too. Same rule as a click: disarm.
+  activeHoverArmed = false;
+
+  const removed = deleteCategory(id); // hides the button and re-renders
+  if (!removed) return;
+
+  const entry = { removed, expiresAt: Date.now() + UNDO_SECONDS * 1000, timer: null };
+  entry.timer = setTimeout(() => finalizeDeletion(entry), UNDO_SECONDS * 1000);
+  pendingDeletions.push(entry);
+
+  startUndoTicker();
+  refreshUndoSlot();
+}
+
+// The category is already out of the state; letting the record go is all that
+// makes the deletion permanent.
+function finalizeDeletion(entry) {
+  clearTimeout(entry.timer);
+  pendingDeletions = pendingDeletions.filter((pending) => pending !== entry);
+  stopUndoTickerIfIdle();
+  refreshUndoSlot();
+}
+
+function undoLastDeletion() {
+  const entry = pendingDeletions.pop();
+  if (!entry) return;
+
+  clearTimeout(entry.timer);
+  restoreCategory(entry.removed); // re-renders, which rebuilds the undo slot
+  activeHoverArmed = false;
+
+  stopUndoTickerIfIdle();
+  refreshUndoSlot();
+}
+
+function startUndoTicker() {
+  if (undoTicker !== null) return;
+  // Four times a second, so the displayed number never lags behind.
+  undoTicker = setInterval(refreshUndoSlot, 250);
+}
+
+function stopUndoTickerIfIdle() {
+  if (pendingDeletions.length > 0 || undoTicker === null) return;
+  clearInterval(undoTicker);
+  undoTicker = null;
+}
+
+function refreshUndoSlot() {
+  if (!root) return;
+  const slot = root.querySelector('.undo-slot');
+  if (!slot) return;
+
+  clear(slot);
+
+  // Only the most recent deletion is offered; undoing it reveals the one before.
+  const entry = pendingDeletions[pendingDeletions.length - 1];
+  if (!entry) return;
+
+  const secondsLeft = Math.max(1, Math.ceil((entry.expiresAt - Date.now()) / 1000));
+
+  slot.appendChild(
+    el(
+      'button',
+      { class: 'undo-button', type: 'button', onClick: undoLastDeletion },
+      el('img', { class: 'undo-button__icon', src: 'assets/icons/undo.svg', alt: '' }),
+      el('span', {
+        text: 'Восстановить ' + entry.removed.data.name + ' (Ctrl+Z) ' + secondsLeft,
+      })
+    )
   );
 }
 
@@ -358,7 +467,7 @@ function startEditingCategory(id) {
   input.select();
 }
 
-function renderMenuButton(state, category) {
+function renderMenuButton(state, category, index) {
   const isActive = category.id === state.ui.activeCategory;
   const isEditing = category.id === editingCategoryId;
 
@@ -389,12 +498,13 @@ function renderMenuButton(state, category) {
         {
           class: 'menu-button__close',
           type: 'button',
+          draggable: 'false', // dragging must start from the button, not the X
           title: 'Удалить категорию',
           'aria-label': 'Удалить категорию',
           onClick: (event) => {
             event.stopPropagation(); // do not also re-select the category
             clearSelection();
-            deleteCategory(category.id);
+            requestDeleteCategory(category.id);
           },
         },
         el('img', { class: 'menu-button__close-icon', src: 'assets/icons/close.svg', alt: '' })
@@ -404,27 +514,92 @@ function renderMenuButton(state, category) {
 
   // A div rather than a <button>: this element hosts a nested button (close)
   // and, while editing, an <input> - neither is valid inside a button.
-  return el(
+  const node = el(
     'div',
     {
-      class: 'menu-button' + (isActive ? ' menu-button--active' : ''),
+      class:
+        'menu-button' +
+        (isActive ? ' menu-button--active' : '') +
+        (isActive && activeHoverArmed ? ' menu-button--hover-armed' : ''),
       role: 'button',
       tabindex: '0',
-      onClick: () => {
-        clearSelection();
-        setActiveCategory(category.id);
-      },
+      draggable: 'true',
+      onClick: () => activateCategory(category.id),
       onDblclick: () => startEditingCategory(category.id),
       onKeydown: (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          clearSelection();
-          setActiveCategory(category.id);
+          activateCategory(category.id);
         }
       },
     },
     children
   );
+
+  // Leaving the button arms the hover state for next time. The class is set
+  // directly rather than through a re-render, which would replace the node the
+  // pointer is interacting with.
+  node.addEventListener('mouseleave', () => {
+    if (!isActive || activeHoverArmed) return;
+    activeHoverArmed = true;
+    node.classList.add('menu-button--hover-armed');
+  });
+
+  node.addEventListener('dragstart', (event) => {
+    draggingCategoryId = category.id;
+    event.dataTransfer.setData('text/plain', category.id);
+    event.dataTransfer.effectAllowed = 'move';
+    node.classList.add('menu-button--dragging');
+  });
+
+  node.addEventListener('dragover', (event) => {
+    if (!draggingCategoryId) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+
+    // Horizontal list, so the midpoint that matters is the left/right one.
+    const box = node.getBoundingClientRect();
+    const after = event.clientX > box.left + box.width / 2;
+    categoryDropTarget = index + (after ? 1 : 0);
+
+    clearCategoryDropMarkers();
+    node.classList.add(after ? 'menu-button--drop-after' : 'menu-button--drop-before');
+  });
+
+  node.addEventListener('drop', (event) => {
+    event.preventDefault();
+    const id = draggingCategoryId;
+    const target = categoryDropTarget;
+
+    clearCategoryDropMarkers();
+    draggingCategoryId = null;
+    categoryDropTarget = null;
+
+    if (id && target !== null) reorderCategories(id, target);
+  });
+
+  node.addEventListener('dragend', () => {
+    clearCategoryDropMarkers();
+    node.classList.remove('menu-button--dragging');
+    draggingCategoryId = null;
+    categoryDropTarget = null;
+  });
+
+  return node;
+}
+
+function activateCategory(id) {
+  // Only a real switch disarms the hover state.
+  if (id !== getState().ui.activeCategory) activeHoverArmed = false;
+  clearSelection();
+  setActiveCategory(id);
+}
+
+function clearCategoryDropMarkers() {
+  if (!root) return;
+  for (const node of root.querySelectorAll('.menu-button')) {
+    node.classList.remove('menu-button--drop-before', 'menu-button--drop-after');
+  }
 }
 
 function renderCategoryNameInput(category) {
