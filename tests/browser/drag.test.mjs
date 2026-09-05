@@ -40,6 +40,15 @@ const centreOf = (nth) => page.evaluate((n) => {
   return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) };
 }, nth);
 
+// A point clearly inside one half of a button. The midpoint is where "insert
+// before" flips to "insert after", so aiming at it makes the drop a coin toss
+// decided by sub-pixel rounding - a 1px shift elsewhere in the header is enough
+// to change the answer.
+const insideOf = (nth, fraction) => page.evaluate((n, f) => {
+  const b = document.querySelectorAll('.menu-button')[n].getBoundingClientRect();
+  return { x: Math.round(b.left + b.width * f), y: Math.round(b.top + b.height / 2) };
+}, nth, fraction);
+
 const names = () => page.evaluate(() =>
   [...document.querySelectorAll('.menu-button__sizer')].map((s) => s.textContent));
 
@@ -82,7 +91,8 @@ check('the active button shows the X before dragging',
 await shot('drag-0-hovered');
 
 // ---------- start a real drag from that button ----------
-const third = await centreOf(2);
+// Past the third button's midpoint, so the drop means "after it".
+const third = await insideOf(2, 0.75);
 const data = await page.mouse.drag(first, third);
 check('the drag actually started', Boolean(data));
 

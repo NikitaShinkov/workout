@@ -122,9 +122,84 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   gap: 8px;
 }
 
+/* Page_selector and Category_list carry the same shell, so the two switchers in
+   the header read as one control language. The buttons inside stay 24px, so the
+   shell is 26px with its border. */
+.page-selector,
 .category-list {
   display: flex;
   align-items: center;
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  background: var(--hover-bg);
+}
+
+.page-selector {
+  flex-shrink: 0;
+}
+
+/* Same 24px/6px/white-when-active language as .menu-button, but a plain button:
+   it hosts no close button and no rename input, so it needs none of the sizer
+   and absolute-label machinery. */
+.page-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.page-button--active {
+  background: #ffffff;
+  color: #000000;
+}
+
+/* Not built yet. It stays visible because the design has three, but it reads as
+   unavailable and goes nowhere. */
+.page-button--disabled {
+  color: var(--not-selected);
+  cursor: default;
+}
+
+/* The exported icons are a solid white fill, which would vanish on the active
+   button's white ground. Painted as a mask over currentColor instead, one file
+   covers all three states - white, black when active, grey when disabled -
+   with the exported geometry untouched. Each keeps its own exported size. */
+.page-button__icon {
+  display: block;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+.page-button__icon--schedule {
+  width: 12px;
+  height: 10px;
+  -webkit-mask-image: url("../assets/icons/Page_selector_schedule.svg");
+  mask-image: url("../assets/icons/Page_selector_schedule.svg");
+}
+
+.page-button__icon--calendar {
+  width: 12px;
+  height: 12px;
+  -webkit-mask-image: url("../assets/icons/Page_selector_calendar.svg");
+  mask-image: url("../assets/icons/Page_selector_calendar.svg");
+}
+
+.page-button__icon--workout {
+  width: 15px;
+  height: 12px;
+  -webkit-mask-image: url("../assets/icons/Page_selector_workout.svg");
+  mask-image: url("../assets/icons/Page_selector_workout.svg");
 }
 
 .menu-button {
@@ -637,11 +712,35 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   visibility: visible;
 }
 
+/* The calendar's side block is a label, not a handle - nothing there drags.
+   The extra 4px of lead-in lines the date up with the Category_block tabs that
+   now start the day, rather than with an exercise row. */
+.complex__side--static {
+  padding: 8px 10px 0 16px;
+  cursor: default;
+}
+
 .complex__items {
   display: flex;
   flex: 1 1 0;
   min-width: 0;
   flex-direction: column;
+}
+
+/* Category_block: the first row of a calendar day, naming which category's
+   complex the blocks below belong to. Aligned with the exercise rows' 10px
+   padding so the tabs line up with the images under them. */
+.category-block {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  flex-shrink: 0;
+}
+
+/* The shell is already drawn by the day's own block, so the tab strip inside it
+   only needs the border. */
+.category-list--day {
+  background: transparent;
 }
 
 /* A row picked out inside a complex needs to stand apart from the complex's own

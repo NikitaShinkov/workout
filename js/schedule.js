@@ -104,6 +104,42 @@ export function buildSchedule(category, now = new Date()) {
   return { start, interval, dates, end: slot > 0 ? addDays(start, (slot - 1) * interval) : null };
 }
 
+// --- the calendar -----------------------------------------------------------
+
+// Local-date key, so two Dates for the same day group together whatever time
+// they carry. Not toISOString: that shifts across the UTC boundary.
+export function dayKey(date) {
+  return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
+}
+
+// Every scheduled complex from every category, gathered by the day it falls on
+// and sorted. A category switched out of the schedule contributes nothing - it
+// has no schedule to place - and neither does a complex with its own switch
+// off, which buildSchedule has already left undated.
+export function buildCalendar(state, now = new Date()) {
+  const days = new Map();
+
+  for (const categoryId of state.categoryOrder) {
+    const category = state.categories[categoryId];
+    if (!category || !category.scheduleEnabled) continue;
+
+    const { dates } = buildSchedule(category, now);
+
+    for (const complex of category.complexes || []) {
+      const date = dates.get(complex.id);
+      if (!date) continue;
+
+      const key = dayKey(date);
+      if (!days.has(key)) days.set(key, { key, date, entries: [] });
+      // Categories arrive in categoryOrder, which is the order the menu shows
+      // them in - so the tabs inside a day read the same way as the menu.
+      days.get(key).entries.push({ categoryId, name: category.name, complex });
+    }
+  }
+
+  return Array.from(days.values()).sort((a, b) => a.date - b.date);
+}
+
 // Index in `complexes` where the Date_pointer goes: before the first complex
 // scheduled today or later, or after the last one if they are all in the past.
 // Disabled complexes carry no date and are simply skipped over.

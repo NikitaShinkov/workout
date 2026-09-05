@@ -245,9 +245,11 @@ export function addExercise(exercise) {
   });
 }
 
-export function updateExercise(id, fields) {
+// `categoryId` is for the calendar, which shows exercises from every category
+// at once; everywhere else the active one is meant.
+export function updateExercise(id, fields, categoryId) {
   update((draft) => {
-    const category = draft.categories[draft.ui.activeCategory];
+    const category = draft.categories[categoryId || draft.ui.activeCategory];
     if (!category) return;
 
     const index = category.exercises.findIndex((e) => e.id === id);
@@ -292,9 +294,9 @@ export function reorderExercises(ids, insertIndex) {
   });
 }
 
-export function toggleFavorite(id) {
+export function toggleFavorite(id, categoryId) {
   update((draft) => {
-    const category = draft.categories[draft.ui.activeCategory];
+    const category = draft.categories[categoryId || draft.ui.activeCategory];
     if (!category) return;
     const exercise = category.exercises.find((e) => e.id === id);
     if (exercise) exercise.favorite = !exercise.favorite;

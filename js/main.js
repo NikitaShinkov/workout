@@ -1,11 +1,11 @@
 // Entry point: load persisted state, then mount the Schedule page.
 
 import { initStore } from './store.js';
-import { mountSchedulePage } from './schedule-page.js';
+import { mountApp } from './app.js';
 
 async function start() {
   await initStore();
-  mountSchedulePage(document.getElementById('app'));
+  mountApp(document.getElementById('app'));
 }
 
 start().catch((error) => {

@@ -6,7 +6,7 @@
      the site root even though this page lives under /tests/browser/. -->
 <base href="/">
 <title>loading</title>
-<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="assets/icons/app_logo.svg" type="image/svg+xml">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/app.css">
 </head>
@@ -23,11 +23,14 @@
     //   &popup=N         open the exercise popup with N generated images
     //   &complexes=2,1,1 build complexes of these sizes from the seeded rows
     //   &off=1           switch complex #1 (0-based) out of the schedule
+    //   &multi           seed a second category with its own complexes, so the
+    //                    calendar has more than one category on a day
+    //   &page=calendar   open on that page instead of the schedule
     import {
       initStore, addExercise, setUiFlag, activeCategory,
-      createComplexFromExercises, setComplexEnabled,
+      createComplexFromExercises, setComplexEnabled, setActiveCategory, getState,
     } from '/js/store.js';
-    import { mountSchedulePage } from '/js/schedule-page.js';
+    import { mountApp, goToPage } from '/js/app.js';
     import { openExerciseModal } from '/js/exercise-modal.js';
     import { createExercise } from '/js/model.js';
 
@@ -99,12 +102,34 @@
       }
     }
 
+    // A second category on the same dates, so a calendar day has two tabs.
+    if (params.has('multi')) {
+      const home = getState().ui.activeCategory;
+      const other = getState().categoryOrder.find((id) => id !== home);
+      setActiveCategory(other);
+
+      const NAMES = ['Приседания у стены', 'Разгибание колена сидя'];
+      for (let i = 0; i < NAMES.length; i += 1) {
+        addExercise(createExercise({
+          name: NAMES[i],
+          description: 'Второй категории упражнение ' + (i + 1) + '.',
+          images: [await makeImage('K' + (i + 1), COLORS[(i + 2) % COLORS.length])],
+          equipment: ['mat'],
+        }));
+      }
+      for (const exercise of activeCategory().exercises) {
+        createComplexFromExercises([exercise.id], activeCategory().complexes.length);
+      }
+      setActiveCategory(home);
+    }
+
     if (params.has('extras')) {
       setUiFlag('showIndicators', true);
       setUiFlag('showFavorites', true);
     }
 
-    mountSchedulePage(document.getElementById('app'));
+    mountApp(document.getElementById('app'));
+    if (params.get('page')) goToPage(params.get('page'));
 
     if (params.has('popup')) {
       const count = Number(params.get('popup')) || 1;

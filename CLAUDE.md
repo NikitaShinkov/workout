@@ -44,6 +44,22 @@ in `.mcp.json`. Load the `figma-design-to-code` guidance before
 | `54:1097` / `56:1316` | Add_exercise_popup, 2 and 7 images |
 | `103:5445` / `103:5501` | menu_button states / new-category flow |
 | `111:5726` | Undo_button |
+| `139:5578` | Header with Page_selector — **not yet seen, see below** |
+| `139:5487` | Page_selector states — **not yet seen** |
+| `139:4737` | Calendar_page — **not yet seen** |
+
+**The Figma MCP is on the Starter plan and its call limit is exhausted.** The
+Page_selector, the new header and the whole calendar page were built from the
+written brief alone; `get_design_context` and `get_screenshot` both refuse. The
+icons were exported by hand into `assets/icons/`, which is the way round this.
+
+**The Page_selector icons export as a solid white fill**, so on the active
+button's white ground they would vanish. They are painted as a **CSS mask over
+`currentColor`** rather than as an `<img>` — one file then covers all three
+states (white, black when active, `--not-selected` when disabled) with the
+exported geometry untouched. Each keeps its own exported size: schedule 12×10,
+calendar 12×12, workout 15×12. The buttons carry no text, so they are addressed
+by `data-page` and named by `aria-label`.
 
 Design tokens (the CSS custom properties in `css/app.css`):
 `--bg #0A0A0B`, `--hover-bg #1D1D1D`, `--stroke #525252`, `--hard #FF453A`,
@@ -131,6 +147,42 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     hangs forever with no error if the start point is not over a draggable
     element — a scrolled-out-of-view handle, for instance.
 
+## Pages
+
+`js/app.js` is the shell: it mounts one page into `#app` and swaps it on
+demand. Each page owns its own header, its own document-level listeners and its
+own store subscription, so **every mount returns the function that undoes it** —
+skip that and two pages render into the same container and both react to every
+mutation. `browser/calendar` guards it (`A MUTATION RENDERS ONE PAGE, NOT TWO`).
+
+**Page_selector holds only calendar and workout — the schedule has no button.**
+A category *is* the way to the schedule, on either page: on the calendar the
+header carries the category list as navigation, and picking one opens that
+category's schedule. So on the schedule page nothing in the selector is active,
+and the selector reads as "somewhere else you can go".
+
+- **schedule** (`js/schedule-page.js`) — the default, and where the app always
+  opens; the page is deliberately not persisted.
+- **calendar** (`js/calendar-page.js`) — read-only. `buildCalendar()` in
+  `js/schedule.js` gathers every scheduled complex from every category by the
+  day it falls on. A day's first row is Category_block, tabs for the categories
+  landing on that day; which tab is open is transient, per day.
+  Its header categories are **navigation, not a filter** — the calendar is not
+  scoped to a category, so none of them is drawn active, and they carry no close
+  button, rename or drag. Add_category_button creates one and leaves for the
+  schedule, editing its name: `editCategoryOnOpen()` in `schedule-page.js` is
+  how that intent survives the page swap.
+- **workout** — not built. The third button is rendered but inert.
+
+`js/exercise-row.js` holds Exercise_block itself. The schedule page and the
+calendar agree on how it *looks* and disagree about what it *does*, so
+everything behavioural arrives through options and nothing in there reads the
+store. The hover-animation registry lives there too, which is why both pages
+call `stopAllRowAnimations()` before a render.
+
+A category switched out of the schedule contributes nothing to the calendar — it
+has no schedule to place.
+
 ## Behaviour worth knowing
 
 - Category close button (X) appears only on the **second** hover after a
@@ -192,7 +244,7 @@ shape is unverified.
 
 ```
 npm install          once
-npm test             all 17 suites, ~570 checks, ~70s
+npm test             all 18 suites, ~610 checks, ~75s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -208,13 +260,14 @@ covers behaviour that is easy to break silently.
   every complex and row a rect, because every drop decision is geometric and
   jsdom's rects are all zero. Anything that re-renders — a click, a key, a
   toggle — throws those rects away, so the helpers call `layout()` again.
-- `tests/browser/` — layout, `:hover` and real drag, via `puppeteer-core`
+- `tests/browser/` — layout, `:hover`, real drag and page switching, via `puppeteer-core`
   driving the Chrome or Edge already installed (`CHROME_PATH` overrides the
   search). jsdom has no layout engine and no `:hover`, so these are the only
   place geometry can be checked.
 - `tests/browser/harness.html` seeds the app without the file picker:
   `?seed=plain|exercises|text`, `&extras`, `&popup=N`, `&complexes=2,1,1`
-  (complex sizes, cut from the seeded exercises) and `&off=1` (switch #1 off).
+  (complex sizes, cut from the seeded exercises), `&off=1` (switch #1 off),
+  `&multi` (a second category with its own complexes) and `&page=calendar`.
 - Screenshots land in `tests/.out/` (gitignored) — read them when a layout
   assertion looks suspicious.
 
