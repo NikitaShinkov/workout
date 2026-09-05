@@ -1,0 +1,108 @@
+# Workout / training app — working notes
+
+Plain HTML, CSS and ES modules. **No build step, no framework, no runtime npm
+dependencies.** Russian UI. Run with `node dev-server.js` → http://localhost:8080
+(a server is required: browsers block ES modules over `file://`).
+
+Deployed from `main` to GitHub Pages: https://nikitashinkov.github.io/workout/
+Repo: https://github.com/NikitaShinkov/workout
+
+## Decisions already made (don't relitigate)
+
+- **Public repo**, app and data together, so the phone needs no login.
+- **No build step.** Vanilla ES modules served as written.
+- **Categories are data**, not constants — user can add / rename / delete / reorder.
+- **IndexedDB, not localStorage**, because images are stored as `Blob`s.
+  localStorage is strings only; base64 (+33%) against a ~5MB quota overflows
+  after a handful of exercises.
+- **Cyclic schedule rotation**: enabled complexes take turns, one every
+  `interval` days, repeating. (Not implemented yet — see Not built.)
+
+## Figma
+
+File key `ULWMwUv9ivvkRUaHA1JikX`, connected via the `figma` MCP server declared
+in `.mcp.json`. Load the `figma-design-to-code` guidance before
+`get_design_context` (the tool insists, and it is right to).
+
+| Node | Frame |
+|---|---|
+| `1:2` | Components |
+| `1:1824` | Schedule_page (full; too large for one call — fetch children) |
+| `56:3253` | Schedule_page_no exercises |
+| `56:4006` | Schedule_page_1 exercise added |
+| `78:2541` | Schedule_page_A lot of exercises |
+| `78:3398` | Schedule_page_Indicator_and_Favorites |
+| `59:6847` | Adaptive 960px (columns stay 50/50 — no stacking) |
+| `54:1097` / `56:1316` | Add_exercise_popup, 2 and 7 images |
+| `103:5445` / `103:5501` | menu_button states / new-category flow |
+| `111:5726` | Undo_button |
+
+Design tokens (the CSS custom properties in `css/app.css`):
+`--bg #0A0A0B`, `--hover-bg #1D1D1D`, `--stroke #525252`, `--hard #FF453A`,
+`--avr #FFD60A`, `--easy #32D74B`, `--active #478CF6`, `--not-selected #5B5B62`.
+Text is Inter 12px throughout; bold is the only variation.
+
+**Figma exports `_active` variants byte-identically to their base.** Verified for
+`Favorites_active` and `Add_category_button_active`. Don't trust the exported
+file to tell you what the active state looks like — screenshot the node and
+sample its pixels. Both cases turned out to be "invert to white ground".
+
+## Gotchas that cost real debugging time
+
+1. **`text-box: trim-both cap alphabetic` + `overflow: hidden` clips glyphs.**
+   The cap edge cuts diacritics (Й, Ё) off the top, the alphabetic edge cuts
+   descenders (у, р, д) off the bottom. Fix: padding for headroom on the child,
+   the compensating negative margin on the **clipping parent** — both on the
+   child pushes the padding outside the parent, which clips it away again.
+   Only use the trim where a box height feeds a gap; elsewhere `text-box: normal`.
+2. **Flex blockifies `display: -webkit-box`**, silently killing
+   `-webkit-line-clamp`. A clamped paragraph must not itself be a flex item —
+   wrap it. (`.exercise-row__subtitle-box` exists only for this.)
+3. **`text-overflow: ellipsis` does nothing on a flex container** — it clips
+   mid-glyph instead. Keep such elements block boxes; centre with `line-height`.
+4. Standard `line-clamp` and `max-lines` are **not supported** in Chrome 152
+   (`CSS.supports` returns false). `-webkit-line-clamp` is the only option.
+5. **Letter shortcuts must match `event.code`, not `event.key`.** On a Russian
+   layout the D key reports `event.key === 'в'`, so Ctrl+D silently missed and
+   Chrome's bookmark dialog won. `Enter`/`Escape`/`Delete` are layout-safe.
+6. **Never re-render during `dragstart`** — it replaces the node being dragged
+   and aborts the gesture. Apply classes by hand; commit state on drop/dragend.
+7. **The drag image is snapshotted synchronously at `dragstart`.** To have it
+   look different from the element left behind, set the class during the event
+   and remove it in a `setTimeout(…, 0)`.
+8. **Percentage-height chains collapse.** `height: 100%` against an auto-height
+   ancestor resolves to auto; that once left `.main` at zero height with
+   `overflow: hidden` hiding everything. Height flows body → `#app` → `.page` →
+   `.main` as an unbroken **flex** chain.
+9. **A re-render throws rows away** — destroy running hover animations first or
+   their timers keep ticking against detached images.
+
+## Behaviour worth knowing
+
+- Category close button (X) appears only on the **second** hover after a
+  category is opened. Clicking, adding, deleting and restoring all disarm it, so
+  the X never lands under the cursor that just clicked.
+- Deleting a category hides it and holds the record 5s behind an undo button /
+  `Ctrl+Z`; deletions stack newest-first with independent timers.
+- Menu button width is fixed by an invisible sizer span carrying the **saved**
+  name — that is what keeps it steady on hover and while typing a longer name.
+- Store state is version 2. `migrate()` in `js/store.js` upgrades version-1
+  saves (which had no category names or order). Keep it working — the user has
+  real data.
+
+## Not built yet, by design
+
+Workout complexes, schedule date calculation, the two `view_options` filter
+checkboxes, feedback capture, the workout page, and syncing data to the repo via
+the GitHub API (`js/db.js` is the seam for that).
+
+## Testing
+
+There is no test runner in the repo. Suites were written ad hoc with **jsdom**
+(logic, ~250 checks) and **puppeteer-core driving the installed Chrome**
+(layout, hover, real drag — jsdom has no layout engine and no `:hover`).
+
+Two lessons: assert **rendered** geometry, not `scrollHeight` (which is the
+unclamped height and reads as "not clamped"); and asserting "text overflows" is
+not the same as asserting "an ellipsis was drawn" — zoomed screenshots caught
+two bugs that green assertions had missed.
