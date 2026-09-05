@@ -26,6 +26,7 @@ js/schedule.js        dates: parsing, formatting, buildSchedule, buildCalendar
 js/schedule-page.js   page 1 - categories, Exercise_list, Complex_list, drag
 js/calendar-page.js   page 2 - every category's schedule, by day. Read-only
 js/page-selector.js   the header's page switcher, shared by both pages
+js/category-button.js the insides of a category button - ditto, see gotcha 16
 js/exercise-row.js    Exercise_block itself, shared by both pages
 js/toolbar-inputs.js  the masked date field and the guarded interval field
 js/exercise-modal.js  Add/edit popup
@@ -173,7 +174,15 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     cleared the selection *by re-rendering*, so clicking into the date field
     while a row was selected tore the field out from under its own focus and
     swallowed the typing. It now drops the two selection classes by hand.
-16. **`page.mouse.drop()` leaves the left button down.** A second
+16. **Every category button must be built by `js/category-button.js`.** The
+    sizer/label pair is not just about width: the label is centred by its own
+    `line-height: 24px`, so a button that puts the name in as bare text centres
+    it by the flex box instead and the name sits **1-2px lower** — visible as a
+    jump when switching pages. And `.menu-button--off` selects `__label`, so a
+    bare-text button silently loses the 50% fade that says a category is out of
+    the schedule. Both bugs came from the calendar header having its own copy.
+    `browser/calendar` sections 2b and 2c guard them.
+17. **`page.mouse.drop()` leaves the left button down.** A second
     `page.mouse.drag()` in the same test then throws "'left' is already
     pressed"; call `page.mouse.up()` after every drop. And `page.mouse.drag()`
     hangs forever with no error if the start point is not over a draggable
@@ -298,7 +307,7 @@ description reaches the bottom of its box.
 
 ```
 npm install          once
-npm test             all 18 suites, ~630 checks, ~80s
+npm test             all 18 suites, ~640 checks, ~85s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```

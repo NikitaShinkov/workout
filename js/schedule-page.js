@@ -34,6 +34,7 @@ import {
 import { buildSchedule, formatDate, pointerIndex, startOfDay } from './schedule.js';
 import { createDateInput, createIntervalInput } from './toolbar-inputs.js';
 import { renderPageSelector } from './page-selector.js';
+import { categoryButtonContents, categoryButtonClass } from './category-button.js';
 import {
   renderExerciseRow as renderRow,
   startRowAnimation,
@@ -770,11 +771,7 @@ function renderMenuButton(state, category, index) {
   const isActive = category.id === state.ui.activeCategory;
   const isEditing = category.id === editingCategoryId;
 
-  // In flow but invisible, so it - and only it - sets the button's width. That
-  // is what keeps the width fixed when the close button appears on hover and
-  // while a longer or shorter name is being typed. It always carries the saved
-  // name, so after saving the width follows the new name.
-  const sizer = el('span', { class: 'menu-button__sizer', text: category.name });
+  const [sizer, label] = categoryButtonContents(category.name);
 
   if (isEditing) {
     return el(
@@ -785,10 +782,7 @@ function renderMenuButton(state, category, index) {
     );
   }
 
-  const children = [
-    sizer,
-    el('span', { class: 'menu-button__label', text: category.name }),
-  ];
+  const children = [sizer, label];
 
   if (isActive) {
     children.push(
@@ -816,13 +810,11 @@ function renderMenuButton(state, category, index) {
   const node = el(
     'div',
     {
-      class:
-        'menu-button' +
-        (isActive ? ' menu-button--active' : '') +
-        (isActive && activeHoverArmed ? ' menu-button--hover-armed' : '') +
-        // Out of the workout schedule: the name fades, so which categories are
-        // switched off is readable straight from the menu.
-        (category.scheduleEnabled ? '' : ' menu-button--off'),
+      class: categoryButtonClass(
+        category,
+        (isActive ? 'menu-button--active' : '') +
+          (isActive && activeHoverArmed ? ' menu-button--hover-armed' : '')
+      ),
       role: 'button',
       tabindex: '0',
       draggable: 'true',

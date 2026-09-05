@@ -19,6 +19,7 @@ import {
 import { buildCalendar, formatDate, pointerIndex, startOfDay } from './schedule.js';
 import { renderPageSelector } from './page-selector.js';
 import { editCategoryOnOpen } from './schedule-page.js';
+import { categoryButtonContents, categoryButtonClass } from './category-button.js';
 import {
   renderExerciseRow,
   renderIndicators,
@@ -110,22 +111,28 @@ function renderCategoryList(state) {
   return el(
     'div',
     { class: 'category-list' },
-    state.categoryOrder.map((id) =>
-      el('div', {
-        class: 'menu-button',
-        role: 'button',
-        tabindex: '0',
-        text: state.categories[id].name,
-        title: 'Открыть расписание: ' + state.categories[id].name,
-        dataset: { id },
-        onClick: () => openCategory(id),
-        onKeydown: (event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          openCategory(id);
+    state.categoryOrder.map((id) => {
+      const category = state.categories[id];
+      return el(
+        'div',
+        {
+          // Same shell as the schedule page's, so the names do not shift and a
+          // category switched out of the schedule stays faded here too.
+          class: categoryButtonClass(category),
+          role: 'button',
+          tabindex: '0',
+          title: 'Открыть расписание: ' + category.name,
+          dataset: { id },
+          onClick: () => openCategory(id),
+          onKeydown: (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            openCategory(id);
+          },
         },
-      })
-    )
+        categoryButtonContents(category.name)
+      );
+    })
   );
 }
 
@@ -257,22 +264,28 @@ function renderCategoryBlock(day, current) {
     el(
       'div',
       { class: 'category-list category-list--day' },
-      day.entries.map((entry) =>
-        el('div', {
-          class:
-            'menu-button' + (entry.categoryId === current.categoryId ? ' menu-button--active' : ''),
-          role: 'tab',
-          tabindex: '0',
-          text: entry.name,
-          'aria-selected': entry.categoryId === current.categoryId ? 'true' : 'false',
-          onClick: () => openDayCategory(day.key, entry.categoryId),
-          onKeydown: (event) => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            event.preventDefault();
-            openDayCategory(day.key, entry.categoryId);
+      day.entries.map((entry) => {
+        const isOpen = entry.categoryId === current.categoryId;
+        return el(
+          'div',
+          {
+            // The same shell again - a tab that centred its name differently
+            // from the header above it would read as a wobble.
+            class: 'menu-button' + (isOpen ? ' menu-button--active' : ''),
+            role: 'tab',
+            tabindex: '0',
+            dataset: { id: entry.categoryId },
+            'aria-selected': isOpen ? 'true' : 'false',
+            onClick: () => openDayCategory(day.key, entry.categoryId),
+            onKeydown: (event) => {
+              if (event.key !== 'Enter' && event.key !== ' ') return;
+              event.preventDefault();
+              openDayCategory(day.key, entry.categoryId);
+            },
           },
-        })
-      )
+          categoryButtonContents(entry.name)
+        );
+      })
     )
   );
 }

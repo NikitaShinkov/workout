@@ -151,7 +151,7 @@ check('2: the exercise column is gone', (await page.$$('.column--exercise')).len
 
 // The categories come with it, as navigation.
 const headerCategories = () => page.$$eval('.header .category-list .menu-button',
-  (n) => n.map((b) => b.textContent));
+  (n) => n.map((b) => b.querySelector('.menu-button__label').textContent));
 check('2: THE CATEGORY LIST IS IN THE HEADER',
   (await headerCategories()).length === 7, (await headerCategories()).length);
 check('2: and the add-category button',
@@ -160,6 +160,92 @@ check('2: none of them is drawn active - the calendar is not scoped to one',
   (await page.$$('.header .category-list .menu-button--active')).length === 0);
 check('2: they carry no close button or rename input',
   (await page.$$('.header .menu-button__close, .header .menu-button__input')).length === 0);
+
+// ---------- 2b. the header button is the SAME button on both pages ----------
+//
+// It used to be built here from bare text rather than the sizer/label pair the
+// schedule page uses. Two bugs came out of that single difference.
+
+const labelBox = () => page.$eval('.header .category-list .menu-button__label', (n) => {
+  const button = n.closest('.menu-button');
+  const b = n.getBoundingClientRect();
+  const outer = button.getBoundingClientRect();
+  return {
+    // Where the name sits inside its button, which is what the eye catches.
+    offset: +(b.top - outer.top).toFixed(1),
+    height: +b.height.toFixed(1),
+    lineHeight: getComputedStyle(n).lineHeight,
+  };
+});
+
+const onCalendar = await labelBox();
+await page.evaluate(() => {
+  document.querySelectorAll('.header .category-list .menu-button')[0].click();
+});
+await new Promise((r) => setTimeout(r, 350));
+const onSchedule = await labelBox();
+await page.evaluate(() => {
+  [...document.querySelectorAll('.page-button')].find((b) => b.dataset.page === 'calendar').click();
+});
+await new Promise((r) => setTimeout(r, 350));
+
+lines.push('\nlabel box - calendar ' + JSON.stringify(onCalendar)
+  + ' schedule ' + JSON.stringify(onSchedule) + '\n');
+check('2b: THE NAME SITS AT THE SAME HEIGHT ON BOTH PAGES - no 1-2px jump',
+  Math.abs(onCalendar.offset - onSchedule.offset) < 0.2
+    && Math.abs(onCalendar.height - onSchedule.height) < 0.2,
+  JSON.stringify(onCalendar) + ' vs ' + JSON.stringify(onSchedule));
+check('2b: both centre it by line-height, not by the flex box',
+  onCalendar.lineHeight === '24px' && onSchedule.lineHeight === '24px',
+  onCalendar.lineHeight + ' / ' + onSchedule.lineHeight);
+
+// ---------- 2c. a category out of the schedule stays faded here ----------
+
+const fadeOf = (name) => page.evaluate((wanted) => {
+  const label = [...document.querySelectorAll('.header .category-list .menu-button__label')]
+    .find((n) => n.textContent === wanted);
+  return label ? getComputedStyle(label).opacity : null;
+}, name);
+
+const victim = (await headerCategories())[2];
+check('2c: it reads at full strength to begin with', (await fadeOf(victim)) === '1',
+  await fadeOf(victim));
+
+await page.evaluate(async (name) => {
+  const store = await import('/js/store.js');
+  const id = store.getState().categoryOrder
+    .find((key) => store.getState().categories[key].name === name);
+  store.getState().categories[id].scheduleEnabled = false;
+  store.setUiFlag('showFavorites', store.getState().ui.showFavorites); // force a render
+}, victim);
+await new Promise((r) => setTimeout(r, 250));
+
+check('2c: SWITCHING ITS SCHEDULE OFF FADES IT ON THE CALENDAR TOO',
+  (await fadeOf(victim)) === '0.5', await fadeOf(victim));
+check('2c: the others are untouched',
+  (await fadeOf((await headerCategories())[1])) === '1');
+await shot('calendar-category-off', '.header');
+
+// And it survives the trip to the schedule page and back.
+await page.evaluate(() => {
+  document.querySelectorAll('.header .category-list .menu-button')[0].click();
+});
+await new Promise((r) => setTimeout(r, 350));
+check('2c: still faded on the schedule page', (await fadeOf(victim)) === '0.5',
+  await fadeOf(victim));
+
+await page.evaluate(async (name) => {
+  const store = await import('/js/store.js');
+  const id = store.getState().categoryOrder
+    .find((key) => store.getState().categories[key].name === name);
+  store.getState().categories[id].scheduleEnabled = true;
+  store.setUiFlag('showFavorites', store.getState().ui.showFavorites);
+}, victim);
+await new Promise((r) => setTimeout(r, 250));
+await page.evaluate(() => {
+  [...document.querySelectorAll('.page-button')].find((b) => b.dataset.page === 'calendar').click();
+});
+await new Promise((r) => setTimeout(r, 350));
 check('2: the two icon buttons are there',
   (await page.$$('.view-options .icon-button')).length === 2,
   (await page.$$('.view-options .icon-button')).length);
@@ -175,8 +261,8 @@ check('2: no schedule switch or fields in it',
 
 const days = await page.evaluate(() => [...document.querySelectorAll('.complex-list .complex')].map((c) => ({
   date: c.querySelector('.complex__date').textContent,
-  tabs: [...c.querySelectorAll('.category-block .menu-button')].map((b) => b.textContent),
-  active: c.querySelector('.category-block .menu-button--active').textContent,
+  tabs: [...c.querySelectorAll('.category-block .menu-button__label')].map((b) => b.textContent),
+  active: c.querySelector('.category-block .menu-button--active .menu-button__label').textContent,
   rows: c.querySelectorAll('.exercise-row').length,
   hasSwitch: Boolean(c.querySelector('.switch')),
   sideDraggable: c.querySelector('.complex__side').getAttribute('draggable'),
@@ -229,10 +315,10 @@ await shot('calendar-tab-switched', '.complex-list');
 // it has exercises - an empty category would land on the empty state, which is
 // correct but tells us less.
 const target = await page.$$eval('.header .category-list .menu-button',
-  (n) => n[1].textContent);
+  (n) => n[1].querySelector('.menu-button__label').textContent);
 await page.evaluate((name) => {
   [...document.querySelectorAll('.header .category-list .menu-button')]
-    .find((b) => b.textContent === name).click();
+    .find((b) => b.querySelector('.menu-button__label').textContent === name).click();
 }, target);
 await new Promise((r) => setTimeout(r, 350));
 
