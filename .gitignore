@@ -9,3 +9,6 @@ desktop.ini
 
 # Local scratch
 *.log
+
+# Test screenshots and diagnostics
+tests/.out/

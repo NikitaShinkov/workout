@@ -13,6 +13,20 @@ Then open http://localhost:8080.
 A server is required: `index.html` loads ES modules, and browsers block module
 loading over `file://`. Opening the file directly will show a blank page.
 
+## Tests
+
+```
+npm install
+npm test
+```
+
+13 suites, about 400 checks, ~45 seconds. The logic suites run under jsdom; the
+layout ones drive the Chrome or Edge already installed on the machine (set
+`CHROME_PATH` if it is somewhere unusual). `npm test -- jsdom` runs a subset.
+
+The app itself still ships no dependencies — these are `devDependencies` only,
+and nothing in `js/` imports them.
+
 ## What is implemented
 
 Stage 1 — the Schedule page and the "add exercise" popup:

@@ -98,11 +98,37 @@ the GitHub API (`js/db.js` is the seam for that).
 
 ## Testing
 
-There is no test runner in the repo. Suites were written ad hoc with **jsdom**
-(logic, ~250 checks) and **puppeteer-core driving the installed Chrome**
-(layout, hover, real drag — jsdom has no layout engine and no `:hover`).
+```
+npm install          once
+npm test             all 13 suites, ~400 checks, ~45s
+npm test -- jsdom    only the logic suites
+npm test -- drag     only suites matching "drag"
+```
 
-Two lessons: assert **rendered** geometry, not `scrollHeight` (which is the
-unclamped height and reads as "not clamped"); and asserting "text overflows" is
-not the same as asserting "an ellipsis was drawn" — zoomed screenshots caught
-two bugs that green assertions had missed.
+`tests/run.mjs` starts `dev-server.js` on port 8123, runs each suite in its own
+process and prints a summary. **Run it after any change** — it is fast and it
+covers behaviour that is easy to break silently.
+
+- `tests/jsdom/` — logic: store, modal, selection, categories, undo, drag.
+  `fake-indexeddb` backs persistence, which is how the version-1 migration is
+  tested against a realistic saved record.
+- `tests/browser/` — layout, `:hover` and real drag, via `puppeteer-core`
+  driving the Chrome or Edge already installed (`CHROME_PATH` overrides the
+  search). jsdom has no layout engine and no `:hover`, so these are the only
+  place geometry can be checked.
+- `tests/browser/harness.html` seeds the app without the file picker:
+  `?seed=plain|exercises|text`, `&extras`, `&popup=N`.
+- Screenshots land in `tests/.out/` (gitignored) — read them when a layout
+  assertion looks suspicious.
+
+Three lessons paid for in debugging:
+
+1. Assert **rendered** geometry, not `scrollHeight` — that is the *unclamped*
+   height, so a working clamp still reads as "3 lines".
+2. "Text overflows" is not "an ellipsis was drawn". A green truncation
+   assertion hid text being clipped mid-glyph; a zoomed screenshot caught it.
+3. Look at the screenshots. Two real bugs — the dead line-clamp and the close
+   button landing under the cursor after a delete — were found by eye while the
+   assertions were passing.
+
+Adding `"type": "module"` to package.json is why `dev-server.js` uses `import`.

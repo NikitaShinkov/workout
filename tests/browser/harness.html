@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<!-- The app resolves its icons relative to the document, so the base has to be
+     the site root even though this page lives under /tests/browser/. -->
+<base href="/">
+<title>loading</title>
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    // Seeded page for the browser suites: it puts the app into a known state
+    // without going through the system file picker.
+    //
+    //   ?seed=plain      categories only (the default)
+    //   ?seed=exercises  four exercises, two images each
+    //   ?seed=text       three exercises chosen to stress text clipping
+    //   &extras          turn on the indicator and favourites columns
+    //   &popup=N         open the exercise popup with N generated images
+    import { initStore, addExercise, setUiFlag } from '/js/store.js';
+    import { mountSchedulePage } from '/js/schedule-page.js';
+    import { openExerciseModal } from '/js/exercise-modal.js';
+    import { createExercise } from '/js/model.js';
+
+    const params = new URLSearchParams(location.search);
+    const seed = params.get('seed') || 'plain';
+    const COLORS = ['#8a2b2b', '#2b5f8a', '#2b8a4f', '#8a7a2b'];
+
+    function makeImage(label, color) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 520;
+      canvas.height = 290;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, 520, 290);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 64px sans-serif';
+      ctx.fillText(label, 30, 175);
+      return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+    }
+
+    const EXERCISES = [
+      ['Отведение ноги на боку', 'Среднеягодичная мышца. Поясничный замок – максимально прижимаем к себе нижнюю ногу. Поясница неподвижна.'],
+      ['Круговое движение прямой ноги на боку (велосипед)', 'Среднеягодичная мышца. Поясничный замок – максимально прижимаем к себе нижнюю ногу. Избегать избыточного включения мышц задней поверхности бедра.'],
+      ['Скручивание ТБС и колена сидя', 'Ягодицы, мобильность. Опора на согнутую руку. Сначала внутренняя ротация колена, потом скручивания ТБС нижней ноги.'],
+      ['Наклоны вперёд сидя с согнутыми ногами', 'Ягодицы, мобильность. Колени под 90 град. Наклоняемся, протягивая руку вдоль пола.'],
+    ];
+
+    // Deliberately awkward text: a title too long for one line, and capitals
+    // whose diacritics sit above cap height (Й, Ё) with descenders below.
+    const TEXT_CASES = [
+      ['Короткое', 'Ягодицы, мобильность. Колени под 90 град.'],
+      ['Круговое движение прямой ноги на боку (велосипед) с очень длинным названием которое точно не поместится в одну строку',
+       'ЙЦУКЕН ЩЁРТ. Среднеягодичная мышца. Поясничный замок – максимально прижимаем к себе нижнюю ногу. Поясница неподвижна. Избегать избыточного включения мышц задней поверхности бедра. Всё движение только в ТБС и никак иначе, это очень длинное описание.'],
+      ['ЙЁЩЪ Заглавные буквы',
+       'ЙЁЩЪ ВЕРХНИЕ ЗАГЛАВНЫЕ БУКВЫ первая строка. Вторая строка тоже есть. Третья строка не должна отображаться совсем никак. Четвёртая тем более.'],
+    ];
+
+    await initStore();
+
+    if (seed === 'exercises' || seed === 'text') {
+      const rows = seed === 'text' ? TEXT_CASES : EXERCISES;
+      for (let i = 0; i < rows.length; i += 1) {
+        const images = seed === 'text'
+          ? [await makeImage(String(i + 1), COLORS[i % COLORS.length])]
+          : [await makeImage(String(i + 1), COLORS[i % COLORS.length]),
+             await makeImage('b', COLORS[(i + 1) % COLORS.length])];
+        addExercise(createExercise({
+          name: rows[i][0], description: rows[i][1], images, equipment: ['mat'],
+        }));
+      }
+    }
+
+    if (params.has('extras')) {
+      setUiFlag('showIndicators', true);
+      setUiFlag('showFavorites', true);
+    }
+
+    mountSchedulePage(document.getElementById('app'));
+
+    if (params.has('popup')) {
+      const count = Number(params.get('popup')) || 1;
+      const images = [];
+      for (let i = 0; i < count; i += 1) {
+        images.push(await makeImage(String(i + 1), COLORS[i % COLORS.length]));
+      }
+      openExerciseModal({ images, defaultEquipment: ['mat'], onSubmit: () => {} });
+      document.querySelector('.input--text').value = 'Скручивание ТБС и колена сидя';
+      document.querySelector('.input--textarea').value =
+        'Ягодицы, мобильность. Опора на согнутую руку. Сначала внутренняя ротация колена, потом скручивания ТБС нижней ноги, рукой можно доводить ногу до крайнего положения.';
+    }
+
+    document.title = 'ready';
+  </script>
+</body>
+</html>
