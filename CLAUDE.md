@@ -7,6 +7,33 @@ dependencies.** Russian UI. Run with `node dev-server.js` → http://localhost:8
 Deployed from `main` to GitHub Pages: https://nikitashinkov.github.io/workout/
 Repo: https://github.com/NikitaShinkov/workout
 
+A push to `main` publishes. Pages takes ~40s; `curl` a file you just added to
+know it is live. Note the site root is `/workout/`, so an **absolute** module
+path (`import('/js/store.js')`) resolves to the domain root and 404s — this is
+also why `tests/browser/harness.html`, with its `<base href="/">`, only works on
+localhost.
+
+## File map
+
+```
+index.html            loads js/main.js as a module
+js/main.js            initStore() then mountApp()
+js/app.js             the shell: which page is mounted, and swapping them
+js/store.js           the whole app state; every mutation goes through update()
+js/db.js              one IndexedDB record holding that state (the sync seam)
+js/model.js           domain constants and factories - no DOM, no storage
+js/schedule.js        dates: parsing, formatting, buildSchedule, buildCalendar
+js/schedule-page.js   page 1 - categories, Exercise_list, Complex_list, drag
+js/calendar-page.js   page 2 - every category's schedule, by day. Read-only
+js/page-selector.js   the header's page switcher, shared by both pages
+js/exercise-row.js    Exercise_block itself, shared by both pages
+js/toolbar-inputs.js  the masked date field and the guarded interval field
+js/exercise-modal.js  Add/edit popup
+js/animation.js       the hover image sequence
+js/images.js          File -> Blob, and blob URLs
+js/dom.js             el() / svg() / clear() - no framework, just these
+```
+
 ## Decisions already made (don't relitigate)
 
 - **Public repo**, app and data together, so the phone needs no login.
@@ -57,9 +84,14 @@ icons were exported by hand into `assets/icons/`, which is the way round this.
 button's white ground they would vanish. They are painted as a **CSS mask over
 `currentColor`** rather than as an `<img>` — one file then covers all three
 states (white, black when active, `--not-selected` when disabled) with the
-exported geometry untouched. Each keeps its own exported size: schedule 12×10,
-calendar 12×12, workout 15×12. The buttons carry no text, so they are addressed
-by `data-page` and named by `aria-label`.
+exported geometry untouched. Each keeps its own exported size: calendar 12×12,
+workout 15×12. The buttons carry no text, so they are addressed by `data-page`
+and named by `aria-label`.
+
+`assets/icons/Page_selector_schedule.svg` (12×10) is committed but **unused** —
+the selector lost its schedule button. `assets/favicon.svg` is likewise unused:
+`assets/icons/app_logo.svg` is the favicon now, in both `index.html` and the
+test harness.
 
 Design tokens (the CSS custom properties in `css/app.css`):
 `--bg #0A0A0B`, `--hover-bg #1D1D1D`, `--stroke #525252`, `--hard #FF453A`,
@@ -183,6 +215,11 @@ call `stopAllRowAnimations()` before a render.
 A category switched out of the schedule contributes nothing to the calendar — it
 has no schedule to place.
 
+The calendar can still star a block and double-click one to edit it, and those
+blocks belong to any category — so `updateExercise` and `toggleFavorite` take an
+optional `categoryId`. Omit it and they mean the active category, as everywhere
+else.
+
 ## Behaviour worth knowing
 
 - Category close button (X) appears only on the **second** hover after a
@@ -235,16 +272,33 @@ A category switched out of the schedule (`scheduleEnabled`) fades its menu
 button, but the rule it exists for — its exercises not appearing on the workout
 page — has nothing to act on until that page is built.
 
-`Date_pointer` is drawn from the metadata only — a 2px `--active` rule with a
-14×18 marker at its left end, as a CSS triangle. The Figma MCP hit its Starter
-plan call limit before the node could be screenshotted, so the marker's real
-shape is unverified.
+## Unverified against the design
+
+Built to the written brief while the Figma MCP was rate-limited. Worth a look
+whenever the plan allows a call again:
+
+- **`Date_pointer`'s marker shape.** A white 14×18 CSS triangle at the left end
+  of a white 2px rule. The geometry came from the node metadata; the shape
+  itself was never seen.
+- **The whole Page_selector.** Button padding is `0 8px` (giving 28/31px
+  buttons), and the unbuilt workout page's icon is `--not-selected` grey so it
+  reads as unavailable. Both are choices, not the design's.
+- **Category_block** on a calendar day — a tab strip reusing `.menu-button`.
+
+## Known issue
+
+`.exercise-row__subtitle` clips its last visible line's descenders, the same
+defect gotcha 1 describes and the title has been fixed for. Harder here: the
+clipping parent `.exercise-row__subtitle-box` is a `flex: 1 1 0` item with
+`box-sizing: border-box`, so the compensating negative margin has to go on the
+parent and interacts with flex height resolution. Visible in any row whose
+description reaches the bottom of its box.
 
 ## Testing
 
 ```
 npm install          once
-npm test             all 18 suites, ~610 checks, ~75s
+npm test             all 18 suites, ~630 checks, ~80s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -264,6 +318,11 @@ covers behaviour that is easy to break silently.
   driving the Chrome or Edge already installed (`CHROME_PATH` overrides the
   search). jsdom has no layout engine and no `:hover`, so these are the only
   place geometry can be checked.
+  Which browser suite covers what: `calendar` the page swap and the calendar
+  page, `toolbar` the two masked fields plus the category switch and the
+  favourites filter, `complex-drag` / `complex-layout` the schedule page's
+  lists, `drag` / `category-layout` / `hover-undo` the category menu,
+  `row-layout` / `text` / `page-layout` typography and geometry.
 - `tests/browser/harness.html` seeds the app without the file picker:
   `?seed=plain|exercises|text`, `&extras`, `&popup=N`, `&complexes=2,1,1`
   (complex sizes, cut from the seeded exercises), `&off=1` (switch #1 off),
