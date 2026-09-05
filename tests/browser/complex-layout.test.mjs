@@ -197,14 +197,18 @@ check('the list actually overflows, so sticking is testable', scrollable > 40, s
 const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 const russian = (date) => date.getDate() + ' ' + MONTHS[date.getMonth()];
 
-async function setStart(text) {
-  await page.evaluate((value) => {
-    const input = document.querySelector('.input--date');
-    input.value = value;
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  }, text);
-  await new Promise((r) => setTimeout(r, 150));
+// Driven the way a user drives it: the field edits as a "DD.MM" mask and
+// commits on blur, so the date is typed as four digits and entered.
+async function setStart(date) {
+  const digits = String(date.getDate()).padStart(2, '0')
+    + String(date.getMonth() + 1).padStart(2, '0');
+  await page.click('.input--date');
+  await page.keyboard.type(digits);
+  await page.keyboard.press('Enter');
+  await new Promise((r) => setTimeout(r, 200));
 }
+
+const thisYear = (month, day) => new Date(new Date().getFullYear(), month, day);
 
 const pointerAt = async (scrollTop) => {
   await page.$eval('.complex-list', (n, top) => { n.scrollTop = top; }, scrollTop);
@@ -214,7 +218,7 @@ const pointerAt = async (scrollTop) => {
 
 // Starting today puts the pointer at the head of the list. Scrolling down would
 // carry it off the top, so it has to park against the top edge instead.
-await setStart(russian(new Date()));
+await setStart(new Date());
 
 const highIndex = await page.evaluate(() =>
   [...document.querySelector('.complex-list').children]
@@ -243,7 +247,7 @@ await shot('complex-pointer-top', '.complex-list');
 
 // A schedule entirely in the past puts the pointer after the last complex, out
 // of sight at the top of the list - it should park against the bottom edge.
-await setStart('1 янв');
+await setStart(thisYear(0, 1));
 const lastIndex = await page.evaluate(() => {
   const kids = [...document.querySelector('.complex-list').children];
   return kids.length - 1 - kids.slice().reverse().findIndex((n) => n.classList.contains('date-pointer'));
@@ -279,7 +283,7 @@ check('scrolled to the end the whole marker is inside the list',
 await shot('complex-pointer-bottom', '.complex-list');
 
 await pointerAt(0);
-await setStart('3 сен');
+await setStart(thisYear(8, 3));
 
 // ---------- the filter checkbox ----------
 

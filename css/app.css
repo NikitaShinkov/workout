@@ -176,6 +176,13 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   text-box: normal;
 }
 
+/* Switched out of the workout schedule. The opacity is on the text, not the
+   button, so the fade reads the same on the white active ground as on the dark
+   one - and the close button on the active category stays fully legible. */
+.menu-button--off .menu-button__label {
+  opacity: 0.5;
+}
+
 /* Make room for the close button by narrowing the text, not the button.
    Requires --hover-armed, so the X does not appear on the hover that is only
    still in progress because the click that opened the category just happened. */

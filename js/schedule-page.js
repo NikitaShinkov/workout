@@ -33,6 +33,7 @@ import {
   setComplexEnabled,
 } from './store.js';
 import { buildSchedule, formatDate, pointerIndex, startOfDay } from './schedule.js';
+import { createDateInput, createIntervalInput } from './toolbar-inputs.js';
 
 // Exact path data from the exported Favorites asset. It is inlined rather than
 // loaded as a file because Figma exports Favorites and Favorites_active
@@ -172,12 +173,15 @@ function scopeKeys(scope) {
   const category = activeCategory();
   if (!category) return [];
 
-  if (scope === 'library') return category.exercises.map((e) => e.id);
+  const state = getState();
+  if (scope === 'library') return visibleExercises(state, category).map((e) => e.id);
 
-  const visible = visibleComplexes(getState(), category);
+  const visible = visibleComplexes(state, category);
   if (scope === 'complex') return visible.map((complex) => complex.id);
   // 'item': flattened across complexes, so a shift-range can span them.
-  return visible.flatMap((complex) => complex.items.map((item) => item.id));
+  return visible.flatMap((complex) =>
+    visibleItems(state, category, complex).map((item) => item.id)
+  );
 }
 
 function isSelected(scope, key) {
@@ -235,7 +239,22 @@ function onDocumentClick(event) {
   if (target && target.closest && target.closest('.exercise-row, .complex__side')) return;
 
   clearSelection();
-  render();
+  // Deliberately NOT a re-render. This runs on the click that focuses the date
+  // or interval field, and rebuilding the page there tears that field out from
+  // under the focus it just received - the caret lands nowhere and the typing
+  // is lost. The selection only ever shows as two classes, so dropping them by
+  // hand is exactly equivalent and touches nothing else.
+  dropSelectionClasses();
+}
+
+function dropSelectionClasses() {
+  if (!root) return;
+  for (const node of root.querySelectorAll('.exercise-row--selected')) {
+    node.classList.remove('exercise-row--selected');
+  }
+  for (const node of root.querySelectorAll('.complex--selected')) {
+    node.classList.remove('complex--selected');
+  }
 }
 
 function onDocumentKeydown(event) {
@@ -451,7 +470,9 @@ function onLibraryDrop(event) {
   const target = rowDropTarget;
   endDrag();
 
-  if (target !== null) reorderExercises(ids, target);
+  // The position is one among the rows on screen; "только избранные" may have
+  // thinned those out, and the store works on the whole list.
+  if (target !== null) reorderExercises(ids, fullExerciseIndex(target));
 }
 
 // --- Complex_list: three sources, two kinds of target -----------------------
@@ -550,15 +571,18 @@ function onComplexListDrop(event) {
   endDrag();
   if (!target) return;
 
-  // Indices come from what is on screen, which the view_options filter may have
-  // thinned out; the store works on the full list.
-  const at = target.type === 'complex' ? fullComplexIndex(target.index) : 0;
+  // Indices come from what is on screen, which either view_options checkbox may
+  // have thinned out; the store works on the full lists.
+  const at =
+    target.type === 'complex'
+      ? fullComplexIndex(target.index)
+      : fullItemIndex(target.complexId, target.index);
 
   if (kind === 'complex') reorderComplexes(ids, at);
   else if (kind === 'library') {
-    if (target.type === 'item') addExercisesToComplex(ids, target.complexId, target.index);
+    if (target.type === 'item') addExercisesToComplex(ids, target.complexId, at);
     else createComplexFromExercises(ids, at);
-  } else if (target.type === 'item') moveComplexItems(ids, target.complexId, target.index);
+  } else if (target.type === 'item') moveComplexItems(ids, target.complexId, at);
   else moveItemsToNewComplex(ids, at);
 }
 
@@ -806,7 +830,10 @@ function renderMenuButton(state, category, index) {
       class:
         'menu-button' +
         (isActive ? ' menu-button--active' : '') +
-        (isActive && activeHoverArmed ? ' menu-button--hover-armed' : ''),
+        (isActive && activeHoverArmed ? ' menu-button--hover-armed' : '') +
+        // Out of the workout schedule: the name fades, so which categories are
+        // switched off is readable straight from the menu.
+        (category.scheduleEnabled ? '' : ' menu-button--off'),
       role: 'button',
       tabindex: '0',
       draggable: 'true',
@@ -1006,7 +1033,6 @@ function renderViewOptions(state) {
     { class: 'view-options' },
     indicatorButton,
     favoritesButton,
-    // Both checkboxes are clickable but deliberately do not filter anything yet.
     renderCheckbox('только включённые комплексы', state.ui.onlyEnabledComplexes, (checked) =>
       setUiFlag('onlyEnabledComplexes', checked)
     ),
@@ -1038,12 +1064,60 @@ function renderMain(state, category) {
   );
 }
 
-// The complexes on screen. Disabled ones keep their place in the data and their
-// slot in the schedule either way - the checkbox only hides them.
+// --- what the two view_options checkboxes leave on screen -------------------
+//
+// Both checkboxes only ever HIDE. Nothing is deleted, positions do not move,
+// and the schedule is still worked out over every complex in the category - so
+// filtering can never renumber a date. Everything downstream of these three
+// helpers works in "visible" positions, which fullExerciseIndex / fullItemIndex
+// / fullComplexIndex map back to real ones before the store sees them.
+
+function visibleExercises(state, category) {
+  if (!state.ui.favoritesOnly) return category.exercises;
+  return category.exercises.filter((exercise) => exercise.favorite);
+}
+
+function visibleItems(state, category, complex) {
+  if (!state.ui.favoritesOnly) return complex.items;
+  const favorites = new Set(
+    category.exercises.filter((exercise) => exercise.favorite).map((exercise) => exercise.id)
+  );
+  return complex.items.filter((item) => favorites.has(item.exerciseId));
+}
+
 function visibleComplexes(state, category) {
-  const complexes = category.complexes || [];
-  if (!state.ui.onlyEnabledComplexes) return complexes;
-  return complexes.filter((complex) => complex.enabled);
+  let complexes = category.complexes || [];
+  if (state.ui.onlyEnabledComplexes) {
+    complexes = complexes.filter((complex) => complex.enabled);
+  }
+  if (state.ui.favoritesOnly) {
+    // A complex with nothing left to show would render as a bare date.
+    complexes = complexes.filter((complex) => visibleItems(state, category, complex).length > 0);
+  }
+  return complexes;
+}
+
+// A position among the exercises on screen -> the same position in the whole
+// list. Identical when no filter is on.
+function fullExerciseIndex(visibleIndex) {
+  const category = activeCategory();
+  if (!category) return 0;
+
+  const visible = visibleExercises(getState(), category);
+  if (visibleIndex >= visible.length) return category.exercises.length;
+  return category.exercises.indexOf(visible[visibleIndex]);
+}
+
+function fullItemIndex(complexId, visibleIndex) {
+  const category = activeCategory();
+  if (!category) return 0;
+
+  const complex = category.complexes.find((c) => c.id === complexId);
+  if (!complex) return 0;
+
+  const visible = visibleItems(getState(), category, complex);
+  if (visibleIndex >= visible.length) return complex.items.length;
+  return complex.items.indexOf(visible[visibleIndex]);
 }
 
 function renderScheduleColumn(state, category) {
@@ -1056,23 +1130,13 @@ function renderScheduleColumn(state, category) {
   });
   toggle.addEventListener('change', () => setCategoryField('scheduleEnabled', toggle.checked));
 
-  const dateInput = el('input', {
-    class: 'input input--date',
-    type: 'text',
-    value: category.scheduleStartDate,
-    placeholder: '3 сен',
-  });
-  dateInput.addEventListener('change', () =>
-    setCategoryField('scheduleStartDate', dateInput.value)
+  // Both fields commit on blur and refuse anything the schedule cannot use -
+  // see js/toolbar-inputs.js.
+  const dateInput = createDateInput(category.scheduleStartDate, (value) =>
+    setCategoryField('scheduleStartDate', value)
   );
-
-  const intervalInput = el('input', {
-    class: 'input input--interval',
-    type: 'text',
-    value: String(category.intervalDays),
-  });
-  intervalInput.addEventListener('change', () =>
-    setCategoryField('intervalDays', intervalInput.value)
+  const intervalInput = createIntervalInput(category.intervalDays, (value) =>
+    setCategoryField('intervalDays', value)
   );
 
   return el(
@@ -1112,7 +1176,7 @@ function renderComplexList(state, category, schedule) {
   visible.forEach((complex, index) => {
     if (index === pointerAt) children.push(renderDatePointer());
     children.push(renderComplex(state, category, complex, index, schedule.dates.get(complex.id), flatItem));
-    flatItem += complex.items.length;
+    flatItem += visibleItems(state, category, complex).length;
   });
   if (pointerAt >= visible.length && visible.length) children.push(renderDatePointer());
 
@@ -1132,7 +1196,7 @@ function renderDatePointer() {
 function renderComplex(state, category, complex, index, date, firstItemIndex) {
   const byId = new Map(category.exercises.map((exercise) => [exercise.id, exercise]));
 
-  const rows = complex.items.map((item, itemIndex) => {
+  const rows = visibleItems(state, category, complex).map((item, itemIndex) => {
     const exercise = byId.get(item.exerciseId);
     if (!exercise) return null; // the store prunes these; belt and braces
     return renderExerciseRow(state, exercise, {
@@ -1217,7 +1281,7 @@ function renderExerciseColumn(state, category) {
   const list = el(
     'div',
     { class: 'exercise-list' },
-    category.exercises.map((exercise, index) =>
+    visibleExercises(state, category).map((exercise, index) =>
       renderExerciseRow(state, exercise, { scope: 'library', key: exercise.id, index })
     )
   );
@@ -1228,7 +1292,7 @@ function renderExerciseColumn(state, category) {
       event.preventDefault();
       // Must agree with effectAllowed, or the drop is silently refused.
       event.dataTransfer.dropEffect = 'move';
-      rowDropTarget = category.exercises.length;
+      rowDropTarget = visibleExercises(state, category).length;
       clearDropMarkers();
       updateAutoScroll('.exercise-list', event.clientY);
     }

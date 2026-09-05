@@ -54,6 +54,31 @@ export function parseStartDate(text, now = new Date()) {
   return date.getMonth() === month ? date : null;
 }
 
+// The editing form of a start date: "19 сен" is what the field shows, "19.09"
+// is what it becomes while it is being typed into.
+function pad2(number) {
+  return String(number).padStart(2, '0');
+}
+
+export function toNumericDate(date) {
+  return pad2(date.getDate()) + '.' + pad2(date.getMonth() + 1);
+}
+
+// Strict: the mask always hands over five characters, and a date the calendar
+// does not have (31.02, 39.09, 12.19) comes back null so the field can put the
+// last good value back.
+export function parseNumericDate(text, now = new Date()) {
+  const match = /^(\d{2})\.(\d{2})$/.exec(String(text || ''));
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  if (month < 0 || month > 11 || day < 1) return null;
+
+  const date = new Date(now.getFullYear(), month, day);
+  return date.getMonth() === month && date.getDate() === day ? date : null;
+}
+
 export function parseInterval(value) {
   const days = Math.floor(Number(value));
   return Number.isFinite(days) && days > 0 ? days : DEFAULT_INTERVAL_DAYS;

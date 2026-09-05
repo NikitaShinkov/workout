@@ -117,7 +117,15 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     `copy` silently killed reordering. **jsdom cannot catch this** — its
     `dataTransfer` stub is a plain object with no such semantics — so a real
     browser test guards it (`complex-drag`, section 0).
-15. **`page.mouse.drop()` leaves the left button down.** A second
+15. **Never re-render from a `blur` handler, or from the click that focuses a
+    field.** Committing the toolbar fields rebuilds the page, which replaces the
+    very input being blurred — Chrome throws "The node to be removed is no
+    longer a child of this node", so `toolbar-inputs.js` defers the store update
+    with `setTimeout(…, 0)`. The mirror image bit harder: `onDocumentClick`
+    cleared the selection *by re-rendering*, so clicking into the date field
+    while a row was selected tore the field out from under its own focus and
+    swallowed the typing. It now drops the two selection classes by hand.
+16. **`page.mouse.drop()` leaves the left button down.** A second
     `page.mouse.drag()` in the same test then throws "'left' is already
     pressed"; call `page.mouse.up()` after every drop. And `page.mouse.drag()`
     hangs forever with no error if the start point is not over a draggable
@@ -148,15 +156,32 @@ sample its pixels. Both cases turned out to be "invert to white ground".
   Switching one off shifts every later complex a slot earlier rather than
   leaving a hole (`19 сен, —, 20 сен`). Dates are computed over the whole list,
   so the "только включённые комплексы" checkbox never renumbers anything.
-- Schedule configuration is not built, so `scheduleStartDate` defaults to
-  `3 сен` (chosen so the Date_pointer lands mid-list) with an interval of 1. The
-  toolbar's two fields do drive it, via `js/schedule.js`.
+- `scheduleStartDate` defaults to `3 сен` (chosen so the Date_pointer lands
+  mid-list) with an interval of 1.
+- **The two toolbar fields are keyboard machines, not text boxes**
+  (`js/toolbar-inputs.js`). The date reads `19 сен` and edits as a fixed
+  `DD.MM` mask: focusing swaps the form and selects all, typing **overwrites**
+  one slot at a time and steps over the dot — so `21.10` is typed as `2110` —
+  and each slot refuses digits outside its range (day `0-3`/`0-9`, month
+  `0-1`/`0-9`). Insertion is never used, so the value is always five characters.
+  A date the calendar lacks (`31.02`) reverts to the last good one on commit,
+  as does Escape. The interval takes 1–99, no leading zero: two digits is what
+  the design's 29px field holds, and it is why the spec's `0542` cannot survive.
+- Both view_options checkboxes only ever **hide**. `visibleExercises` /
+  `visibleItems` / `visibleComplexes` are the single source of what is on
+  screen, and every drop position they produce is mapped back through
+  `fullExerciseIndex` / `fullItemIndex` / `fullComplexIndex` before the store
+  sees it. Dates are still worked out over every complex, so filtering can never
+  renumber one.
 
 ## Not built yet, by design
 
-Cyclic schedule rotation, the `только избранные` filter, feedback capture, the
-workout page, and syncing data to the repo via the GitHub API (`js/db.js` is the
-seam for that).
+Cyclic schedule rotation, feedback capture, the workout page, and syncing data
+to the repo via the GitHub API (`js/db.js` is the seam for that).
+
+A category switched out of the schedule (`scheduleEnabled`) fades its menu
+button, but the rule it exists for — its exercises not appearing on the workout
+page — has nothing to act on until that page is built.
 
 `Date_pointer` is drawn from the metadata only — a 2px `--active` rule with a
 14×18 marker at its left end, as a CSS triangle. The Figma MCP hit its Starter
@@ -167,7 +192,7 @@ shape is unverified.
 
 ```
 npm install          once
-npm test             all 16 suites, ~500 checks, ~55s
+npm test             all 17 suites, ~570 checks, ~70s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
