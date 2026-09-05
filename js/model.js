@@ -1,5 +1,7 @@
 // Fixed domain data and factories. No DOM, no storage.
 
+import { DEFAULT_START_DATE, DEFAULT_INTERVAL_DAYS } from './schedule.js';
+
 // Seed categories. These are only used to build a fresh state - once saved,
 // categories are ordinary data the user can rename, add to and delete.
 export const DEFAULT_CATEGORIES = [
@@ -68,13 +70,31 @@ export function createExercise(fields = {}) {
   };
 }
 
+// A complex is an ordered run of exercises performed on one day. Its items do
+// not hold exercises, they POINT at them: the same exercise can be dragged into
+// several complexes, and editing it once must change every scheduled copy.
+// The item id is what selection and drag address, so two items referencing the
+// same exercise stay independently selectable and movable.
+export function createComplexItem(exerciseId) {
+  return { id: uid('ci'), exerciseId };
+}
+
+export function createComplex(exerciseIds = []) {
+  return {
+    id: uid('cx'),
+    // In the schedule by default; the Switch on Complex_side_block turns it off.
+    enabled: true,
+    items: exerciseIds.map(createComplexItem),
+  };
+}
+
 export function createCategoryState(name = NEW_CATEGORY_NAME) {
   return {
     name,
     exercises: [],
-    complexes: [],                 // reserved for the next iteration
+    complexes: [],
     scheduleEnabled: true,
-    scheduleStartDate: '',
-    intervalDays: 1,
+    scheduleStartDate: DEFAULT_START_DATE,
+    intervalDays: DEFAULT_INTERVAL_DAYS,
   };
 }

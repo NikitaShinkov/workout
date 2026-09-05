@@ -21,7 +21,12 @@
     //   ?seed=text       three exercises chosen to stress text clipping
     //   &extras          turn on the indicator and favourites columns
     //   &popup=N         open the exercise popup with N generated images
-    import { initStore, addExercise, setUiFlag } from '/js/store.js';
+    //   &complexes=2,1,1 build complexes of these sizes from the seeded rows
+    //   &off=1           switch complex #1 (0-based) out of the schedule
+    import {
+      initStore, addExercise, setUiFlag, activeCategory,
+      createComplexFromExercises, setComplexEnabled,
+    } from '/js/store.js';
     import { mountSchedulePage } from '/js/schedule-page.js';
     import { openExerciseModal } from '/js/exercise-modal.js';
     import { createExercise } from '/js/model.js';
@@ -72,6 +77,25 @@
         addExercise(createExercise({
           name: rows[i][0], description: rows[i][1], images, equipment: ['mat'],
         }));
+      }
+    }
+
+    // Complexes are built from the exercises just seeded, taken in order and cut
+    // into runs of the requested sizes.
+    if (params.has('complexes')) {
+      const sizes = params.get('complexes').split(',').map(Number).filter((n) => n > 0);
+      const ids = activeCategory().exercises.map((e) => e.id);
+      let at = 0;
+      for (const size of sizes) {
+        const slice = ids.slice(at, at + size);
+        at += size;
+        if (slice.length) {
+          createComplexFromExercises(slice, activeCategory().complexes.length);
+        }
+      }
+      for (const index of (params.get('off') || '').split(',').filter(Boolean)) {
+        const complex = activeCategory().complexes[Number(index)];
+        if (complex) setComplexEnabled(complex.id, false);
       }
     }
 

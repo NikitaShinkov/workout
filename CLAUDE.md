@@ -17,6 +17,14 @@ Repo: https://github.com/NikitaShinkov/workout
   after a handful of exercises.
 - **Cyclic schedule rotation**: enabled complexes take turns, one every
   `interval` days, repeating. (Not implemented yet — see Not built.)
+- **A complex item points at an exercise, it does not copy it.**
+  `{id, exerciseId}`, so the same exercise can be scheduled many times, editing
+  it once updates every scheduled copy, and the image `Blob`s are stored once
+  rather than duplicated into IndexedDB per drag. The item id — not the exercise
+  id — is what selection and drag address, so two items referencing the same
+  exercise stay independent. Deleting an exercise takes its scheduled items with
+  it, and `js/store.js` prunes any complex that is left empty; an empty complex
+  has no date to show and nothing to perform, so the list never holds one.
 
 ## Figma
 
@@ -76,6 +84,19 @@ sample its pixels. Both cases turned out to be "invert to white ground".
    `.main` as an unbroken **flex** chain.
 9. **A re-render throws rows away** — destroy running hover animations first or
    their timers keep ticking against detached images.
+10. **Complexes need the 8px gap between them.** It is not decoration: it is the
+    only place "drop between two complexes" can be distinguished from "drop
+    inside one of them", since complexes are stacked blocks of full-width rows.
+    The other complex-level lane is `.complex__side`, which spans the full
+    height of the block.
+11. **`position: sticky` with both `top: 0` and `bottom: 0`** is what parks the
+    Date_pointer against whichever edge of the list it has scrolled past. Note
+    that it only *sticks* when its natural position is actually outside the
+    scrollport — a test that scrolls too little just measures the natural
+    position and proves nothing.
+12. **`page.mouse.drop()` leaves the left button down.** A second
+    `page.mouse.drag()` in the same test then throws "'left' is already
+    pressed"; call `page.mouse.up()` after every drop.
 
 ## Behaviour worth knowing
 
@@ -88,19 +109,40 @@ sample its pixels. Both cases turned out to be "invert to white ground".
   name — that is what keeps it steady on hover and while typing a longer name.
 - Store state is version 2. `migrate()` in `js/store.js` upgrades version-1
   saves (which had no category names or order). Keep it working — the user has
-  real data.
+  real data. It also normalises `complexes`, which earlier saves left empty.
+- **One selection, three scopes.** `schedule-page.js` holds a single
+  `{scope, ids, anchor}` — `'library'` (exercise ids), `'item'` (complex-item
+  ids) or `'complex'` (complex ids). Selecting in one scope replaces the whole
+  selection, which is what makes the spec's mutual-exclusion rules fall out for
+  free and lets Del dispatch without guessing which list it means.
+- Dropping onto an exercise row inside a complex inserts into that complex;
+  dropping anywhere else in Complex_list — the side block, a gap, the empty
+  space below — makes a new complex at that boundary. Dragging a whole complex
+  always resolves to a boundary, whatever is under the cursor.
+- Complexes take schedule slots in list order, and only if their Switch is on.
+  Switching one off shifts every later complex a slot earlier rather than
+  leaving a hole (`19 сен, —, 20 сен`). Dates are computed over the whole list,
+  so the "только включённые комплексы" checkbox never renumbers anything.
+- Schedule configuration is not built, so `scheduleStartDate` defaults to
+  `3 сен` (chosen so the Date_pointer lands mid-list) with an interval of 1. The
+  toolbar's two fields do drive it, via `js/schedule.js`.
 
 ## Not built yet, by design
 
-Workout complexes, schedule date calculation, the two `view_options` filter
-checkboxes, feedback capture, the workout page, and syncing data to the repo via
-the GitHub API (`js/db.js` is the seam for that).
+Cyclic schedule rotation, the `только избранные` filter, feedback capture, the
+workout page, and syncing data to the repo via the GitHub API (`js/db.js` is the
+seam for that).
+
+`Date_pointer` is drawn from the metadata only — a 2px `--active` rule with a
+14×18 marker at its left end, as a CSS triangle. The Figma MCP hit its Starter
+plan call limit before the node could be screenshotted, so the marker's real
+shape is unverified.
 
 ## Testing
 
 ```
 npm install          once
-npm test             all 13 suites, ~400 checks, ~45s
+npm test             all 16 suites, ~500 checks, ~55s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -109,15 +151,20 @@ npm test -- drag     only suites matching "drag"
 process and prints a summary. **Run it after any change** — it is fast and it
 covers behaviour that is easy to break silently.
 
-- `tests/jsdom/` — logic: store, modal, selection, categories, undo, drag.
-  `fake-indexeddb` backs persistence, which is how the version-1 migration is
-  tested against a realistic saved record.
+- `tests/jsdom/` — logic: store, modal, selection, categories, undo, drag,
+  complexes. `fake-indexeddb` backs persistence, which is how the version-1
+  migration is tested against a realistic saved record.
+  `complexes.test.mjs` installs a **fake layout engine** (`layout()`) that gives
+  every complex and row a rect, because every drop decision is geometric and
+  jsdom's rects are all zero. Anything that re-renders — a click, a key, a
+  toggle — throws those rects away, so the helpers call `layout()` again.
 - `tests/browser/` — layout, `:hover` and real drag, via `puppeteer-core`
   driving the Chrome or Edge already installed (`CHROME_PATH` overrides the
   search). jsdom has no layout engine and no `:hover`, so these are the only
   place geometry can be checked.
 - `tests/browser/harness.html` seeds the app without the file picker:
-  `?seed=plain|exercises|text`, `&extras`, `&popup=N`.
+  `?seed=plain|exercises|text`, `&extras`, `&popup=N`, `&complexes=2,1,1`
+  (complex sizes, cut from the seeded exercises) and `&off=1` (switch #1 off).
 - Screenshots land in `tests/.out/` (gitignored) — read them when a layout
   assertion looks suspicious.
 

@@ -5,6 +5,9 @@
 :root {
   --bg: #0a0a0b;
   --hover-bg: #1d1d1d;
+  /* One step lighter than --hover-bg, so a row picked out inside a complex
+     stays legible against the complex's own hover / selected fill. */
+  --hover-bg-block: #3a3a3a;
   --stroke: #525252;
   --hard: #ff453a;
   --avr: #ffd60a;
@@ -549,6 +552,133 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
 .exercise-list {
   display: flex;
   flex-direction: column;
+}
+
+/* ---------- complex list ---------- */
+
+/* The gap is not decoration: it is the drop zone the spec asks for. Complexes
+   are stacked blocks of full-width rows, so without it "between two complexes"
+   and "inside one of them" would land on the same pixel. */
+.complex-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.complex-list--drop {
+  box-shadow: inset 0 2px 0 0 var(--active);
+}
+
+.complex {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  border-radius: 6px;
+  /* Keeps a row's hover fill inside the rounded corners. */
+  overflow: hidden;
+}
+
+.complex:hover,
+.complex--selected {
+  background: var(--hover-bg);
+}
+
+.complex--dragging {
+  opacity: 0.4;
+}
+
+.complex--drop-before {
+  box-shadow: inset 0 2px 0 0 var(--active);
+}
+
+.complex--drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--active);
+}
+
+/* Complex_side_block: 16px of lead-in plus the 42px date column = 58px, which
+   lines the date up with the schedule toolbar above it. It is also the drag
+   handle - the exercise rows to its right have to stay draggable themselves. */
+.complex__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  width: 58px;
+  flex-shrink: 0;
+  padding: 4px 0 0 16px;
+  cursor: grab;
+  user-select: none;
+}
+
+.complex__date {
+  width: 42px;
+}
+
+/* Out of the schedule: the date is replaced by an em dash, greyed so the row
+   reads as inactive at a glance. */
+.complex--off .complex__date {
+  color: var(--not-selected);
+}
+
+/* The switch appears on hover, per the design. `visibility` rather than
+   `display` so the side block's height never jumps as the pointer crosses it. */
+.switch--complex {
+  visibility: hidden;
+}
+
+.complex:hover .switch--complex,
+.complex--selected .switch--complex,
+.switch--complex:focus-within {
+  visibility: visible;
+}
+
+.complex__items {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+}
+
+/* A row picked out inside a complex needs to stand apart from the complex's own
+   hover fill, which is already --hover-bg. */
+.complex .exercise-row:hover,
+.complex .exercise-row--selected {
+  background: var(--hover-bg-block);
+}
+
+/* ---------- date pointer ---------- */
+
+/* Sticky at BOTH edges: scrolled off the top it parks against the top of the
+   list, scrolled off the bottom it parks against the bottom, so today's
+   position is always readable without hunting for it. */
+.date-pointer {
+  position: sticky;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  height: 18px;
+  flex-shrink: 0;
+  /* It must never swallow a dragover meant for the list underneath. */
+  pointer-events: none;
+}
+
+.date-pointer::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 2px;
+  background: var(--active);
+}
+
+/* Date_pointer_icon is 14x18; a triangle that size needs no asset. */
+.date-pointer__icon {
+  width: 0;
+  height: 0;
+  flex-shrink: 0;
+  border-left: 14px solid var(--active);
+  border-top: 9px solid transparent;
+  border-bottom: 9px solid transparent;
 }
 
 /* 66px keeps the design's row pitch (previously 58px + an 8px gap) while the

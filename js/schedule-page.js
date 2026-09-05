@@ -23,7 +23,16 @@ import {
   deleteCategory,
   restoreCategory,
   reorderCategories,
+  createComplexFromExercises,
+  addExercisesToComplex,
+  moveComplexItems,
+  moveItemsToNewComplex,
+  deleteComplexItems,
+  deleteComplexes,
+  reorderComplexes,
+  setComplexEnabled,
 } from './store.js';
+import { buildSchedule, formatDate, pointerIndex, startOfDay } from './schedule.js';
 
 // Exact path data from the exported Favorites asset. It is inlined rather than
 // loaded as a file because Figma exports Favorites and Favorites_active
@@ -57,8 +66,18 @@ const LEVEL_COLORS = {
 const INDICATOR_SLOTS = 5;
 
 // Transient UI state - not worth persisting across reloads.
-let selectedIds = new Set();
-let anchorIndex = null;
+//
+// One selection, and it belongs to exactly one of three scopes at a time:
+//
+//   'library'  exercise rows in Exercise_list, addressed by exercise id
+//   'item'     exercise rows inside complexes,  addressed by complex-item id
+//   'complex'  whole complexes,                 addressed by complex id
+//
+// A single scoped set is what makes the spec's exclusion rules fall out for
+// free: selecting anywhere drops whatever was selected somewhere else, so Del
+// never has to guess which of the three lists it is aimed at.
+const EMPTY_SELECTION = { scope: null, ids: new Set(), anchor: null };
+let selection = EMPTY_SELECTION;
 
 // Id of the category whose name is being edited inline, if any.
 let editingCategoryId = null;
@@ -78,9 +97,13 @@ let undoTicker = null;
 let draggingCategoryId = null;
 let categoryDropTarget = null;
 
-// Row drag state.
-let draggingIds = null;
+// Row and complex drag state. `drag.kind` matches the selection scopes above
+// and decides what a drop means; `rowDropTarget` is an index in Exercise_list,
+// `complexDropTarget` is either {type:'item', complexId, index} for a drop
+// inside a complex or {type:'complex', index} for a drop between them.
+let drag = null;
 let rowDropTarget = null;
+let complexDropTarget = null;
 
 // Hover animations, keyed by their image box so each can be torn down again.
 const rowAnimations = new Map();
@@ -141,45 +164,75 @@ function startEditExercise(exercise) {
 
 // --- selection -------------------------------------------------------------
 
-function onExerciseClick(event, index) {
+// The keys of a scope, in the order they are displayed - the order shift-range
+// selection walks and the order a dragged group keeps. Read from the state
+// rather than captured at render time, so a handler bound to an old node still
+// works out the right answer.
+function scopeKeys(scope) {
   const category = activeCategory();
-  if (!category) return;
-  const exercises = category.exercises;
+  if (!category) return [];
 
-  if (event.shiftKey && anchorIndex !== null) {
-    // Shift: select the range between the anchor and this row.
-    const from = Math.min(anchorIndex, index);
-    const to = Math.max(anchorIndex, index);
-    selectedIds = new Set(exercises.slice(from, to + 1).map((e) => e.id));
+  if (scope === 'library') return category.exercises.map((e) => e.id);
+
+  const visible = visibleComplexes(getState(), category);
+  if (scope === 'complex') return visible.map((complex) => complex.id);
+  // 'item': flattened across complexes, so a shift-range can span them.
+  return visible.flatMap((complex) => complex.items.map((item) => item.id));
+}
+
+function isSelected(scope, key) {
+  return selection.scope === scope && selection.ids.has(key);
+}
+
+// The selection in display order. A group drag has to keep the relative order
+// of what it moves, and a Set does not carry it.
+function orderedSelection() {
+  if (!selection.scope) return [];
+  return scopeKeys(selection.scope).filter((key) => selection.ids.has(key));
+}
+
+// Shared by all three scopes: plain click replaces, Ctrl toggles, Shift takes
+// the range from the anchor. Clicking in a new scope starts a fresh selection,
+// which is what clears the other two lists.
+function selectAt(event, scope, index) {
+  const keys = scopeKeys(scope);
+  const key = keys[index];
+  if (key === undefined) return;
+
+  const sameScope = selection.scope === scope;
+  const ids = sameScope ? new Set(selection.ids) : new Set();
+  const anchor = sameScope ? selection.anchor : null;
+
+  if (event.shiftKey && anchor !== null) {
+    const from = Math.min(anchor, index);
+    const to = Math.max(anchor, index);
+    selection = { scope, ids: new Set(keys.slice(from, to + 1)), anchor };
   } else if (event.ctrlKey || event.metaKey) {
-    // Ctrl: add to / remove from the existing selection.
-    const id = exercises[index].id;
-    if (selectedIds.has(id)) selectedIds.delete(id);
-    else selectedIds.add(id);
-    anchorIndex = index;
+    if (ids.has(key)) ids.delete(key);
+    else ids.add(key);
+    selection = { scope, ids, anchor: index };
   } else {
-    selectedIds = new Set([exercises[index].id]);
-    anchorIndex = index;
+    selection = { scope, ids: new Set([key]), anchor: index };
   }
 
   render();
 }
 
 function clearSelection() {
-  selectedIds = new Set();
-  anchorIndex = null;
+  selection = EMPTY_SELECTION;
 }
 
-// A left click on anything that is not an exercise row drops the selection -
-// including empty space inside the list itself.
+// A left click on anything that is not a selectable block drops the selection -
+// including empty space inside either list.
 function onDocumentClick(event) {
   if (isModalOpen()) return;
   // Re-rendering here would tear the name input out from under the caret.
   if (editingCategoryId !== null) return;
-  if (selectedIds.size === 0) return;
+  if (selection.ids.size === 0) return;
 
   const target = event.target;
-  if (target && target.closest && target.closest('.exercise-row')) return;
+  // Complex_side_block is the complex's own click target, so it counts too.
+  if (target && target.closest && target.closest('.exercise-row, .complex__side')) return;
 
   clearSelection();
   render();
@@ -212,10 +265,27 @@ function onDocumentKeydown(event) {
     return;
   }
 
-  if (event.key === 'Delete' && selectedIds.size > 0) {
+  // Ctrl+G groups the exercises selected in Exercise_list into a new complex.
+  // event.code again: on a Russian layout the G key reports event.key === 'п'.
+  if ((event.ctrlKey || event.metaKey) && event.code === 'KeyG') {
+    if (selection.scope !== 'library' || selection.ids.size === 0) return;
     event.preventDefault();
-    deleteExercises(Array.from(selectedIds));
+
+    const category = activeCategory();
+    createComplexFromExercises(orderedSelection(), category.complexes.length);
+    return;
+  }
+
+  if (event.key === 'Delete' && selection.ids.size > 0) {
+    event.preventDefault();
+
+    const doomed = orderedSelection();
+    if (selection.scope === 'library') deleteExercises(doomed);
+    else if (selection.scope === 'item') deleteComplexItems(doomed);
+    else if (selection.scope === 'complex') deleteComplexes(doomed);
+
     clearSelection();
+    render();
   }
 }
 
@@ -253,34 +323,67 @@ function stopAllRowAnimations() {
 
 // --- row drag and drop -----------------------------------------------------
 
-function clearRowDropMarkers() {
-  const list = root.querySelector('.exercise-list');
-  if (!list) return;
-  for (const node of list.querySelectorAll('.exercise-row')) {
+function clearDropMarkers() {
+  if (!root) return;
+  for (const node of root.querySelectorAll('.exercise-row')) {
     node.classList.remove('exercise-row--drop-before', 'exercise-row--drop-after');
   }
+  for (const node of root.querySelectorAll('.complex')) {
+    node.classList.remove('complex--drop-before', 'complex--drop-after');
+  }
+  const list = root.querySelector('.complex-list');
+  if (list) list.classList.remove('complex-list--drop');
 }
 
-function onRowDragStart(event, exercise, rowEl) {
-  // Dragging a selected row moves the whole selection; dragging an unselected
-  // one moves just that row and leaves the selection alone.
-  draggingIds = selectedIds.has(exercise.id) ? Array.from(selectedIds) : [exercise.id];
+// Dragging a selected block moves the whole selection; dragging an unselected
+// one moves just that block and leaves the selection alone.
+function draggedKeys(scope, key) {
+  return isSelected(scope, key) ? orderedSelection() : [key];
+}
 
-  event.dataTransfer.setData('text/plain', draggingIds.join(','));
-  event.dataTransfer.effectAllowed = 'move';
+function onRowDragStart(event, context, rowEl) {
+  drag = { kind: context.scope, ids: draggedKeys(context.scope, context.key) };
+
+  event.dataTransfer.setData('text/plain', drag.ids.join(','));
+  // A library row is copied into the schedule, not taken out of the list.
+  event.dataTransfer.effectAllowed = context.scope === 'library' ? 'copy' : 'move';
 
   // Re-rendering here would destroy the node being dragged and abort the drag,
   // so the visual state is applied directly.
-  const list = root.querySelector('.exercise-list');
-  const ids = new Set(draggingIds);
-  for (const node of list.querySelectorAll('.exercise-row')) {
-    if (ids.has(node.dataset.id)) node.classList.add('exercise-row--dragging');
-  }
+  markDragging('.exercise-row', 'exercise-row--dragging', drag.ids);
   stopRowAnimation(rowEl.querySelector('.exercise-row__image-box'));
 }
 
-function onRowDragOver(event, index, rowEl) {
-  if (!draggingIds) return;
+// Library rows carry exercise ids and complex rows carry item ids, so matching
+// on data-id alone never marks a row in the other list.
+function markDragging(selector, className, ids) {
+  const keys = new Set(ids);
+  for (const node of root.querySelectorAll(selector)) {
+    if (keys.has(node.dataset.id)) node.classList.add(className);
+  }
+}
+
+function clearDragClasses() {
+  if (!root) return;
+  for (const node of root.querySelectorAll('.exercise-row--dragging, .complex--dragging')) {
+    node.classList.remove('exercise-row--dragging', 'complex--dragging');
+  }
+}
+
+function endDrag() {
+  clearDropMarkers();
+  clearDragClasses();
+  drag = null;
+  rowDropTarget = null;
+  complexDropTarget = null;
+}
+
+// --- Exercise_list: reorder within the library ------------------------------
+
+function onLibraryRowDragOver(event, index, rowEl) {
+  // Scheduled blocks and complexes have no meaning back in the library, so the
+  // drop is simply not accepted.
+  if (!drag || drag.kind !== 'library') return;
   event.preventDefault();
   event.dataTransfer.dropEffect = 'move';
 
@@ -288,33 +391,115 @@ function onRowDragOver(event, index, rowEl) {
   const after = event.clientY > box.top + box.height / 2;
   rowDropTarget = after ? index + 1 : index;
 
-  clearRowDropMarkers();
+  clearDropMarkers();
   rowEl.classList.add(after ? 'exercise-row--drop-after' : 'exercise-row--drop-before');
 }
 
-function onRowDrop(event) {
+function onLibraryDrop(event) {
+  if (!drag || drag.kind !== 'library') return;
   event.preventDefault();
 
-  const ids = draggingIds;
+  const ids = drag.ids;
   const target = rowDropTarget;
+  endDrag();
 
-  clearRowDropMarkers();
-  draggingIds = null;
-  rowDropTarget = null;
-
-  if (ids && target !== null) reorderExercises(ids, target);
+  if (target !== null) reorderExercises(ids, target);
 }
 
-function onRowDragEnd() {
-  clearRowDropMarkers();
-  const list = root.querySelector('.exercise-list');
-  if (list) {
-    for (const node of list.querySelectorAll('.exercise-row--dragging')) {
-      node.classList.remove('exercise-row--dragging');
-    }
+// --- Complex_list: three sources, two kinds of target -----------------------
+
+// Where a complex-level insertion would land: the first complex whose midpoint
+// is below the cursor, or the end of the list. Works over the gaps between
+// complexes and the empty space below them, which is exactly where the spec
+// says a drop creates a new complex.
+function complexBoundaryAt(list, clientY) {
+  const nodes = Array.from(list.querySelectorAll('.complex'));
+  for (let i = 0; i < nodes.length; i += 1) {
+    const box = nodes[i].getBoundingClientRect();
+    if (clientY < box.top + box.height / 2) return i;
   }
-  draggingIds = null;
-  rowDropTarget = null;
+  return nodes.length;
+}
+
+function onComplexListDragOver(event) {
+  if (!drag) return;
+
+  const list = event.currentTarget;
+  const row = event.target.closest && event.target.closest('.exercise-row');
+
+  // A whole complex can only ever land between complexes, so it ignores the row
+  // under the cursor. An exercise dropped on a row lands inside that complex;
+  // anywhere else - the side block, a gap, the empty space - makes a new one.
+  if (drag.kind !== 'complex' && row) {
+    const box = row.getBoundingClientRect();
+    const after = event.clientY > box.top + box.height / 2;
+    complexDropTarget = {
+      type: 'item',
+      complexId: row.dataset.complexId,
+      index: Number(row.dataset.itemIndex) + (after ? 1 : 0),
+    };
+  } else {
+    complexDropTarget = { type: 'complex', index: complexBoundaryAt(list, event.clientY) };
+  }
+
+  event.preventDefault();
+  event.dataTransfer.dropEffect = drag.kind === 'library' ? 'copy' : 'move';
+  paintComplexDropMarker(list);
+}
+
+function paintComplexDropMarker(list) {
+  clearDropMarkers();
+  const target = complexDropTarget;
+  if (!target) return;
+
+  if (target.type === 'item') {
+    const complex = list.querySelector('.complex[data-id="' + target.complexId + '"]');
+    const rows = complex ? complex.querySelectorAll('.exercise-row') : [];
+    // Past the last row the marker goes under it instead of over a row that
+    // does not exist.
+    if (target.index < rows.length) rows[target.index].classList.add('exercise-row--drop-before');
+    else if (rows.length) rows[rows.length - 1].classList.add('exercise-row--drop-after');
+    return;
+  }
+
+  const complexes = list.querySelectorAll('.complex');
+  if (complexes.length === 0) list.classList.add('complex-list--drop');
+  else if (target.index < complexes.length) {
+    complexes[target.index].classList.add('complex--drop-before');
+  } else complexes[complexes.length - 1].classList.add('complex--drop-after');
+}
+
+function onComplexListDrop(event) {
+  if (!drag) return;
+  event.preventDefault();
+
+  const kind = drag.kind;
+  const ids = drag.ids;
+  const target = complexDropTarget;
+  endDrag();
+  if (!target) return;
+
+  // Indices come from what is on screen, which the view_options filter may have
+  // thinned out; the store works on the full list.
+  const at = target.type === 'complex' ? fullComplexIndex(target.index) : 0;
+
+  if (kind === 'complex') reorderComplexes(ids, at);
+  else if (kind === 'library') {
+    if (target.type === 'item') addExercisesToComplex(ids, target.complexId, target.index);
+    else createComplexFromExercises(ids, at);
+  } else if (target.type === 'item') moveComplexItems(ids, target.complexId, target.index);
+  else moveItemsToNewComplex(ids, at);
+}
+
+// A position among the complexes on screen -> the same position in the whole
+// list. With "только включённые комплексы" off the two are identical.
+function fullComplexIndex(visibleIndex) {
+  const category = activeCategory();
+  if (!category) return 0;
+
+  const visible = visibleComplexes(getState(), category);
+  if (visibleIndex >= visible.length) return category.complexes.length;
+  return category.complexes.indexOf(visible[visibleIndex]);
 }
 
 // --- render ----------------------------------------------------------------
@@ -324,8 +509,11 @@ function render() {
   const category = activeCategory();
 
   // Drop selections that no longer exist (after a delete or category switch).
-  const liveIds = new Set(category ? category.exercises.map((e) => e.id) : []);
-  for (const id of Array.from(selectedIds)) if (!liveIds.has(id)) selectedIds.delete(id);
+  if (selection.scope) {
+    const live = new Set(scopeKeys(selection.scope));
+    const ids = new Set(Array.from(selection.ids).filter((key) => live.has(key)));
+    selection = ids.size ? { ...selection, ids } : EMPTY_SELECTION;
+  }
 
   stopAllRowAnimations();
   clear(root);
@@ -747,12 +935,22 @@ function renderMain(state, category) {
   return el(
     'div',
     { class: 'main' },
-    renderScheduleColumn(category),
+    renderScheduleColumn(state, category),
     renderExerciseColumn(state, category)
   );
 }
 
-function renderScheduleColumn(category) {
+// The complexes on screen. Disabled ones keep their place in the data and their
+// slot in the schedule either way - the checkbox only hides them.
+function visibleComplexes(state, category) {
+  const complexes = category.complexes || [];
+  if (!state.ui.onlyEnabledComplexes) return complexes;
+  return complexes.filter((complex) => complex.enabled);
+}
+
+function renderScheduleColumn(state, category) {
+  const schedule = buildSchedule(category);
+
   const toggle = el('input', {
     class: 'switch__input',
     type: 'checkbox',
@@ -764,7 +962,7 @@ function renderScheduleColumn(category) {
     class: 'input input--date',
     type: 'text',
     value: category.scheduleStartDate,
-    placeholder: '19 сен',
+    placeholder: '3 сен',
   });
   dateInput.addEventListener('change', () =>
     setCategoryField('scheduleStartDate', dateInput.value)
@@ -790,11 +988,130 @@ function renderScheduleColumn(category) {
       dateInput,
       el('span', { class: 'toolbar-label', text: 'с интервалом' }),
       intervalInput,
-      // The end date is derived from the complex schedule, which this stage
-      // does not build yet, so there is nothing real to show here.
-      el('span', { class: 'toolbar-label', text: 'день по —' })
+      // The end date falls out of the schedule: the last complex still in it.
+      el('span', {
+        class: 'toolbar-label',
+        text: 'день по ' + (schedule.end ? formatDate(schedule.end) : '—'),
+      })
     ),
-    el('div', { class: 'complex-list' })
+    renderComplexList(state, category, schedule)
+  );
+}
+
+function renderComplexList(state, category, schedule) {
+  const visible = visibleComplexes(state, category);
+  // With nothing scheduled there is nothing for the pointer to point at, and a
+  // lone blue rule under the toolbar reads as a glitch rather than as today.
+  const pointerAt = visible.length
+    ? pointerIndex(visible, schedule.dates, startOfDay())
+    : -1;
+
+  const children = [];
+  // Item ids are numbered across the whole list, not per complex, so a
+  // shift-range can run from one complex into the next.
+  let flatItem = 0;
+
+  visible.forEach((complex, index) => {
+    if (index === pointerAt) children.push(renderDatePointer());
+    children.push(renderComplex(state, category, complex, index, schedule.dates.get(complex.id), flatItem));
+    flatItem += complex.items.length;
+  });
+  if (pointerAt >= visible.length && visible.length) children.push(renderDatePointer());
+
+  const list = el('div', { class: 'complex-list' }, children);
+  list.addEventListener('dragover', onComplexListDragOver);
+  list.addEventListener('drop', onComplexListDrop);
+  return list;
+}
+
+// A rule across the list marking today. Sticky at both edges, so scrolling past
+// it in either direction parks it against the near edge of the list instead of
+// letting it disappear.
+function renderDatePointer() {
+  return el('div', { class: 'date-pointer' }, el('span', { class: 'date-pointer__icon' }));
+}
+
+function renderComplex(state, category, complex, index, date, firstItemIndex) {
+  const byId = new Map(category.exercises.map((exercise) => [exercise.id, exercise]));
+
+  const rows = complex.items.map((item, itemIndex) => {
+    const exercise = byId.get(item.exerciseId);
+    if (!exercise) return null; // the store prunes these; belt and braces
+    return renderExerciseRow(state, exercise, {
+      scope: 'item',
+      key: item.id,
+      index: firstItemIndex + itemIndex,
+      complexId: complex.id,
+      itemIndex,
+    });
+  });
+
+  const node = el(
+    'div',
+    {
+      class:
+        'complex' +
+        (isSelected('complex', complex.id) ? ' complex--selected' : '') +
+        (complex.enabled ? '' : ' complex--off'),
+      dataset: { id: complex.id },
+    },
+    renderComplexSide(complex, index, date),
+    el('div', { class: 'complex__items' }, rows)
+  );
+
+  // Set up here rather than in renderComplexSide, which has no handle on the
+  // block the drag image is snapshotted from.
+  const side = node.querySelector('.complex__side');
+  side.addEventListener('dragstart', (event) => {
+    drag = { kind: 'complex', ids: draggedKeys('complex', complex.id) };
+    event.dataTransfer.setData('text/plain', drag.ids.join(','));
+    event.dataTransfer.effectAllowed = 'move';
+
+    // Only the side block is draggable - the exercise rows to its right have to
+    // stay draggable in their own right - but what travels with the cursor
+    // should still be the whole complex.
+    if (event.dataTransfer.setDragImage) {
+      const box = node.getBoundingClientRect();
+      event.dataTransfer.setDragImage(node, event.clientX - box.left, event.clientY - box.top);
+    }
+    markDragging('.complex', 'complex--dragging', drag.ids);
+  });
+  side.addEventListener('dragend', endDrag);
+
+  return node;
+}
+
+function renderComplexSide(complex, index, date) {
+  const toggle = el('input', {
+    class: 'switch__input',
+    type: 'checkbox',
+    checked: complex.enabled,
+  });
+  toggle.addEventListener('change', () => setComplexEnabled(complex.id, toggle.checked));
+
+  const switchLabel = el(
+    'label',
+    {
+      class: 'switch switch--complex',
+      title: 'Включить комплекс в расписание',
+      // Flipping the switch must not also select the complex behind it.
+      onClick: (event) => event.stopPropagation(),
+      onDragstart: (event) => event.preventDefault(),
+    },
+    toggle,
+    el('span', { class: 'switch__track' })
+  );
+
+  return el(
+    'div',
+    {
+      class: 'complex__side',
+      draggable: 'true',
+      onClick: (event) => selectAt(event, 'complex', index),
+    },
+    // A complex out of the schedule has no date to show.
+    el('span', { class: 'complex__date', text: date ? formatDate(date) : '—' }),
+    switchLabel
   );
 }
 
@@ -802,19 +1119,21 @@ function renderExerciseColumn(state, category) {
   const list = el(
     'div',
     { class: 'exercise-list' },
-    category.exercises.map((exercise, index) => renderExerciseRow(state, exercise, index))
+    category.exercises.map((exercise, index) =>
+      renderExerciseRow(state, exercise, { scope: 'library', key: exercise.id, index })
+    )
   );
 
   // Dropping below the last row appends.
   list.addEventListener('dragover', (event) => {
-    if (event.target === list && draggingIds) {
+    if (event.target === list && drag && drag.kind === 'library') {
       event.preventDefault();
       rowDropTarget = category.exercises.length;
-      clearRowDropMarkers();
+      clearDropMarkers();
     }
   });
   list.addEventListener('drop', (event) => {
-    if (event.target === list) onRowDrop(event);
+    if (event.target === list) onLibraryDrop(event);
   });
 
   return el(
@@ -839,7 +1158,9 @@ function renderAddButton(label) {
   );
 }
 
-function renderExerciseRow(state, exercise, index) {
+// The same row in both lists, per the spec - only what a click selects and what
+// a drag carries differ, and both come out of `context.scope`.
+function renderExerciseRow(state, exercise, context) {
   const imageBox = el(
     'div',
     { class: 'exercise-row__image-box' },
@@ -851,10 +1172,17 @@ function renderExerciseRow(state, exercise, index) {
   const row = el(
     'div',
     {
-      class: 'exercise-row' + (selectedIds.has(exercise.id) ? ' exercise-row--selected' : ''),
+      class:
+        'exercise-row' +
+        (isSelected(context.scope, context.key) ? ' exercise-row--selected' : ''),
       draggable: 'true',
-      dataset: { id: exercise.id },
-      onClick: (event) => onExerciseClick(event, index),
+      dataset:
+        context.scope === 'library'
+          ? { id: context.key }
+          // The complex list's drop handler reads both of these off the row it
+          // is over, to work out which complex and which slot in it.
+          : { id: context.key, complexId: context.complexId, itemIndex: String(context.itemIndex) },
+      onClick: (event) => selectAt(event, context.scope, context.index),
       onDblclick: () => startEditExercise(exercise),
       onMouseenter: () => startRowAnimation(imageBox, exercise),
       onMouseleave: () => stopRowAnimation(imageBox),
@@ -884,10 +1212,15 @@ function renderExerciseRow(state, exercise, index) {
     state.ui.showFavorites ? renderFavoriteStar(exercise) : null
   );
 
-  row.addEventListener('dragstart', (event) => onRowDragStart(event, exercise, row));
-  row.addEventListener('dragover', (event) => onRowDragOver(event, index, row));
-  row.addEventListener('drop', onRowDrop);
-  row.addEventListener('dragend', onRowDragEnd);
+  row.addEventListener('dragstart', (event) => onRowDragStart(event, context, row));
+  row.addEventListener('dragend', endDrag);
+
+  // Rows inside a complex leave dragover and drop to the list, which needs the
+  // whole geometry to tell "into this complex" from "between two of them".
+  if (context.scope === 'library') {
+    row.addEventListener('dragover', (event) => onLibraryRowDragOver(event, context.index, row));
+    row.addEventListener('drop', onLibraryDrop);
+  }
 
   return row;
 }
