@@ -80,6 +80,45 @@ check('the complex switched off shows an em dash',
 check('the ones still scheduled run consecutively',
   counts.dates[0] === '3 сен' && counts.dates[2] === '4 сен', counts.dates.join(','));
 
+const stacked = await page.evaluate(() => {
+  const [a, b] = document.querySelectorAll('.complex');
+  return +(b.getBoundingClientRect().top - a.getBoundingClientRect().bottom).toFixed(1);
+});
+check('complexes are stacked flush, with no gap between them', stacked === 0, stacked);
+
+// ---------- Date_pointer ----------
+
+const pointer = await page.evaluate(() => {
+  const line = document.querySelector('.date-pointer');
+  const icon = document.querySelector('.date-pointer__icon');
+  const lineBox = line.getBoundingClientRect();
+  const iconBox = icon.getBoundingClientRect();
+  const lineStyle = getComputedStyle(line);
+  return {
+    lineColor: lineStyle.backgroundColor,
+    lineHeight: +lineBox.height.toFixed(1),
+    iconColor: getComputedStyle(icon).borderLeftColor,
+    iconW: +iconBox.width.toFixed(1),
+    iconH: +iconBox.height.toFixed(1),
+    // Negative = the rule starts to the LEFT of the marker's right edge, i.e.
+    // it runs underneath it and cannot leave a gap at the taper.
+    gapAtTaper: +(lineBox.left - iconBox.right).toFixed(1),
+    // How far the marker hangs off the rule, above and below.
+    above: +(lineBox.top - iconBox.top).toFixed(1),
+    below: +(iconBox.bottom - lineBox.bottom).toFixed(1),
+  };
+});
+
+check('the pointer rule is white', pointer.lineColor === 'rgb(255, 255, 255)', pointer.lineColor);
+check('so is the marker', pointer.iconColor === 'rgb(255, 255, 255)', pointer.iconColor);
+check('the rule is 2px tall', pointer.lineHeight === 2, pointer.lineHeight);
+check('the marker is 14x18', pointer.iconW === 14 && pointer.iconH === 18,
+  pointer.iconW + 'x' + pointer.iconH);
+check('the rule runs under the marker, so the taper leaves no gap',
+  pointer.gapAtTaper <= -14, pointer.gapAtTaper);
+check('the marker is centred on the rule', Math.abs(pointer.above - pointer.below) < 0.6,
+  pointer.above + ' / ' + pointer.below);
+
 // ---------- Complex_side_block geometry ----------
 
 const side = await box('.complex__side');
@@ -87,10 +126,15 @@ const dateBox = await box('.complex__date');
 const toolbar = await box('.schedule-toolbar');
 const complex = await box('.complex');
 
-check('side block is 58px wide', side.w === 58, side.w);
+check('side block is 68px wide', side.w === 68, side.w);
 check('the date column is 42px', dateBox.w === 42, dateBox.w);
 check('the date starts 16px in, level with the toolbar',
   Math.abs(dateBox.x - (toolbar.x + 16)) < 0.6, dateBox.x + ' vs ' + (toolbar.x + 16));
+// 10px of air on the right, so the switch does not butt up against the block.
+const firstRowBox = await box('.complex .exercise-row');
+check('the date column clears the exercise block by 10px',
+  Math.abs(firstRowBox.x - (dateBox.x + dateBox.w + 10)) < 0.6,
+  firstRowBox.x + ' vs ' + (dateBox.x + dateBox.w + 10));
 check('the side block is as tall as its complex',
   Math.abs(side.h - complex.h) < 0.6, side.h + ' vs ' + complex.h);
 check('a two-row complex is two rows tall', Math.abs(complex.h - 132) < 0.6, complex.h);
@@ -185,10 +229,16 @@ check('the pointer spans the width of the list',
 
 const highStuck = await pointerAt(9999);
 const firstComplex = await box('.complex');
-check('scrolled down, the pointer stays at the top of the list',
+check('scrolled down, the RULE stays at the top of the list',
   Math.abs(highStuck.y - listBox.y) < 1, highStuck.y + ' vs list top ' + listBox.y);
 check('while the complex it precedes has scrolled up out of view - so it stuck',
   firstComplex.y < listBox.y - 10, firstComplex.y + ' vs ' + listBox.y);
+
+// The marker is what overflows, not the rule: the list edge lines up with the
+// rule and clips the marker's upper half.
+const markerAtTop = await box('.date-pointer__icon');
+check('the marker hangs above the list edge and is clipped there',
+  markerAtTop.y < listBox.y - 6, markerAtTop.y + ' vs ' + listBox.y);
 await shot('complex-pointer-top', '.complex-list');
 
 // A schedule entirely in the past puts the pointer after the last complex, out
@@ -213,9 +263,19 @@ check('scrolled above it, the pointer sticks to the bottom of the list',
 check('while the complex it follows is still below the fold - so it stuck',
   lastComplex > listBox.y + listBox.h + 10, lastComplex + ' vs ' + (listBox.y + listBox.h));
 
-const lowNatural = await pointerAt(9999);
-check('scrolled to the end it reaches its natural place, below everything',
-  lowNatural.y > lowStuck.y - 1, lowNatural.y + ' / ' + lowStuck.y);
+// Parked at the bottom edge the marker's lower half is off the list; scrolling
+// all the way down brings the whole of it into view, which is what proves the
+// edge was clipping it rather than the marker simply being small.
+const markerStuck = await box('.date-pointer__icon');
+check('parked at the bottom, the marker hangs past the list edge',
+  markerStuck.bottom > listBox.y + listBox.h + 6,
+  markerStuck.bottom + ' vs ' + (listBox.y + listBox.h));
+
+await pointerAt(9999);
+const markerAtEnd = await box('.date-pointer__icon');
+check('scrolled to the end the whole marker is inside the list',
+  markerAtEnd.bottom <= listBox.y + listBox.h + 0.6,
+  markerAtEnd.bottom + ' vs ' + (listBox.y + listBox.h));
 await shot('complex-pointer-bottom', '.complex-list');
 
 await pointerAt(0);

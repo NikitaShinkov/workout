@@ -70,9 +70,9 @@ function shape() {
 
 // ---------- a fake layout engine ----------
 //
-// Every complex is as tall as its rows, with the 8px gap the stylesheet puts
-// between them. Rects are assigned after each render, so clientY in a drag
-// event means the same thing it would in a browser.
+// Every complex is as tall as its rows, and they are stacked flush. Rects are
+// assigned after each render, so clientY in a drag event means the same thing
+// it would in a browser.
 function setRect(node, top, height) {
   node.getBoundingClientRect = () => ({
     top, height, bottom: top + height, left: 0, right: 900, width: 900,
@@ -86,16 +86,31 @@ function layout() {
     const rows = Array.from(complexNode.querySelectorAll('.exercise-row'));
     setRect(complexNode, y, rows.length * ROW_H);
     rows.forEach((row, i) => setRect(row, y + i * ROW_H, ROW_H));
-    y += rows.length * ROW_H + 8;
+    y += rows.length * ROW_H;
   }
   libraryRows().forEach((row, i) => setRect(row, i * ROW_H, ROW_H));
 }
 
-// Vertical middle of a complex row, and the two halves of it.
-const rowTop = (i) => complexRows()[i].getBoundingClientRect().top + 1;
-const rowBottom = (i) => complexRows()[i].getBoundingClientRect().bottom - 1;
-// A point inside the gap that follows complex `i`.
-const gapAfter = (i) => complexNodes()[i].getBoundingClientRect().bottom + 4;
+// Must match BOUNDARY_BAND in schedule-page.js.
+const BAND = 12;
+
+// Halves of a complex row, kept clear of the boundary bands at a complex's
+// outer edges - these mean "into this complex, above / below this block".
+const rowTop = (i) => complexRows()[i].getBoundingClientRect().top + BAND + 4;
+const rowBottom = (i) => complexRows()[i].getBoundingClientRect().bottom - BAND - 4;
+
+// The boundary bands themselves: the top edge of a complex's first row and the
+// bottom edge of its last, which mean "a new complex here". Each comes with the
+// row the cursor would actually be over.
+const firstRowOf = (i) => complexNodes()[i].querySelector('.exercise-row');
+const lastRowOf = (i) => {
+  const rows = complexNodes()[i].querySelectorAll('.exercise-row');
+  return rows[rows.length - 1];
+};
+const boundaryBefore = (i) => complexNodes()[i].getBoundingClientRect().top + 1;
+const boundaryAfter = (i) => complexNodes()[i].getBoundingClientRect().bottom - 1;
+// Past the end of every complex, in the empty space below the list.
+const belowAll = () => 99999;
 
 function transfer() {
   const bag = {};
@@ -181,14 +196,35 @@ check('2: the two copies are separate items',
   complexes()[0].items[0].id !== complexes()[0].items[3].id);
 
 // Into the empty space below every complex -> a brand new complex.
-dragTo(libraryRows()[3], $('.complex-list'), 9999);
+dragTo(libraryRows()[3], $('.complex-list'), belowAll());
 check('2: dropped in empty space, it made a new complex', complexes().length === 2, complexes().length);
 check('2: the new complex is last and holds just it',
   shape() === 'Третье+Первое+Второе+Третье | Четвёртое', shape());
 
-// Into the gap between the two complexes -> a new complex in between.
-dragTo(libraryRows()[4], $('.complex-list'), gapAfter(0));
-check('2: dropped in a gap, a complex appears there',
+// On the bottom edge of a complex's last block -> a new complex after it,
+// rather than one more block appended to it.
+dragTo(libraryRows()[4], lastRowOf(0), boundaryAfter(0));
+check('2: dropped on a complex\'s bottom edge, a complex appears after it',
+  shape() === 'Третье+Первое+Второе+Третье | Пятое | Четвёртое', shape());
+
+// The top edge of the very first block: the only way to put a complex above the
+// first one, since the complexes are stacked flush.
+dragTo(libraryRows()[3], firstRowOf(0), boundaryBefore(0));
+check('2: dropped on the top edge of the first block, a complex appears above',
+  shape() === 'Четвёртое | Третье+Первое+Второе+Третье | Пятое | Четвёртое', shape());
+
+// Just inside that band it is an ordinary insertion into the complex again -
+// the band must not swallow the first slot.
+dragTo(libraryRows()[1], firstRowOf(1), rowTop(1));
+check('2: just inside the edge it is still an insert into the complex',
+  shape() === 'Четвёртое | Второе+Третье+Первое+Второе+Третье | Пятое | Четвёртое', shape());
+
+// Put the list back the way the rest of the suite expects.
+click(complexRows()[0]);
+key({ key: 'Delete' });
+click(complexRows()[0]);
+key({ key: 'Delete' });
+check('2: back to three complexes',
   shape() === 'Третье+Первое+Второе+Третье | Пятое | Четвёртое', shape());
 
 // ---------- 3. the schedule ----------
@@ -236,9 +272,9 @@ dragTo(complexRows()[4], complexRows()[0], rowTop(0));
 check('5: dropping on a row in another complex inserts at that spot',
   shape() === 'Третье+Первое+Второе+Третье | Пятое | Четвёртое', shape());
 
-// Drag a block into the gap after the first complex -> its own new complex.
-dragTo(complexRows()[3], $('.complex-list'), gapAfter(0));
-check('5: dragged into a gap it becomes a complex of its own',
+// Drag a block onto the bottom edge of the first complex -> its own complex.
+dragTo(complexRows()[3], lastRowOf(0), boundaryAfter(0));
+check('5: dragged onto a complex edge it becomes a complex of its own',
   shape() === 'Третье+Первое+Второе | Третье | Пятое | Четвёртое', shape());
 
 // A group: select two rows in complex 0 and drag them into the last complex.
@@ -260,7 +296,7 @@ check('5: a complex emptied by a move disappears',
 const sides = () => $$('.complex__side');
 
 layout();
-dragTo(sides()[0], sides()[2], gapAfter(2));
+dragTo(sides()[0], sides()[2], belowAll());
 check('6: a complex dragged by its side block moved to the end',
   shape() === 'Пятое | Четвёртое+Третье+Первое | Третье+Второе', shape());
 check('6: the dates followed the new order',
@@ -272,6 +308,40 @@ click(sides()[2], { shiftKey: true });
 check('6: two complexes selected', $$('.complex--selected').length === 2);
 dragTo(sides()[1], complexNodes()[0], complexNodes()[0].getBoundingClientRect().top + 1);
 check('6: both complexes moved as a group',
+  shape() === 'Четвёртое+Третье+Первое | Третье+Второе | Пятое', shape());
+
+// ---------- 6b. re-rendering keeps the list where the user left it ----------
+
+// A render rebuilds both lists from scratch. Without the scroll being carried
+// across, selecting anything or reordering a complex snapped the list back to
+// the first complex.
+const complexList = () => $('.complex-list');
+// jsdom has no layout, so the list reports a zero scroll height and refuses a
+// scrollTop - the property is stubbed to make it behave like a real scroller.
+let fakeScrollTop = 0;
+Object.defineProperty(dom.window.HTMLElement.prototype, 'scrollTop', {
+  configurable: true,
+  get() { return this.classList.contains('complex-list') ? fakeScrollTop : 0; },
+  set(value) { if (this.classList.contains('complex-list')) fakeScrollTop = value; },
+});
+
+complexList().scrollTop = 120;
+click(sides()[0]);
+check('6b: selecting a complex leaves the scroll alone',
+  complexList().scrollTop === 120, complexList().scrollTop);
+
+dragTo(sides()[0], sides()[1], boundaryAfter(1));
+check('6b: reordering complexes leaves the scroll alone',
+  complexList().scrollTop === 120, complexList().scrollTop);
+
+click(complexRows()[0]);
+check('6b: selecting a block leaves the scroll alone',
+  complexList().scrollTop === 120, complexList().scrollTop);
+
+// Put the order back and drop the stub.
+dragTo(sides()[1], sides()[0], boundaryBefore(0));
+delete dom.window.HTMLElement.prototype.scrollTop;
+check('6b: the order was restored',
   shape() === 'Четвёртое+Третье+Первое | Третье+Второе | Пятое', shape());
 
 // ---------- 7. selection is exclusive across the three lists ----------

@@ -556,13 +556,12 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
 
 /* ---------- complex list ---------- */
 
-/* The gap is not decoration: it is the drop zone the spec asks for. Complexes
-   are stacked blocks of full-width rows, so without it "between two complexes"
-   and "inside one of them" would land on the same pixel. */
+/* Complexes are stacked flush. "Between two complexes" is therefore not a place
+   on screen but a band: the outer 12px of a complex's first and last rows, plus
+   the side block and the empty space below. See itemTargetFor(). */
 .complex-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
 .complex-list--drop {
@@ -573,8 +572,6 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   display: flex;
   align-items: stretch;
   flex-shrink: 0;
-  border-radius: 6px;
-  /* Keeps a row's hover fill inside the rounded corners. */
   overflow: hidden;
 }
 
@@ -595,17 +592,18 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   box-shadow: inset 0 -2px 0 0 var(--active);
 }
 
-/* Complex_side_block: 16px of lead-in plus the 42px date column = 58px, which
-   lines the date up with the schedule toolbar above it. It is also the drag
-   handle - the exercise rows to its right have to stay draggable themselves. */
+/* Complex_side_block: 16px of lead-in, the 42px date column and 10px of air on
+   the right so the switch does not butt up against the exercise block = 68px.
+   The lead-in lines the date up with the schedule toolbar above it. It is also
+   the drag handle - the exercise rows to its right stay draggable themselves. */
 .complex__side {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
-  width: 58px;
+  width: 68px;
   flex-shrink: 0;
-  padding: 4px 0 0 16px;
+  padding: 4px 10px 0 16px;
   cursor: grab;
   user-select: none;
 }
@@ -650,33 +648,33 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
 
 /* Sticky at BOTH edges: scrolled off the top it parks against the top of the
    list, scrolled off the bottom it parks against the bottom, so today's
-   position is always readable without hunting for it. */
+   position is always readable without hunting for it.
+   The element IS the rule - 2px tall, nothing else - so what parks against the
+   edge of the list is the line. The marker is taken out of flow on top of it
+   and simply overflows; the list clips whichever half sticks out. */
 .date-pointer {
   position: sticky;
   top: 0;
   bottom: 0;
   z-index: 2;
-  display: flex;
-  align-items: center;
-  height: 18px;
+  height: 2px;
   flex-shrink: 0;
+  background: #ffffff;
   /* It must never swallow a dragover meant for the list underneath. */
   pointer-events: none;
 }
 
-.date-pointer::after {
-  content: "";
-  flex: 1 1 auto;
-  height: 2px;
-  background: var(--active);
-}
-
-/* Date_pointer_icon is 14x18; a triangle that size needs no asset. */
+/* Date_pointer_icon is 14x18; a triangle that size needs no asset. It sits ON
+   the rule rather than beside it, so the taper toward the apex cannot leave the
+   sliver of a gap that a line starting at x=14 does. */
 .date-pointer__icon {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
   width: 0;
   height: 0;
-  flex-shrink: 0;
-  border-left: 14px solid var(--active);
+  border-left: 14px solid #ffffff;
   border-top: 9px solid transparent;
   border-bottom: 9px solid transparent;
 }
@@ -765,17 +763,19 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   align-self: stretch;
 }
 
-/* Cap-height trim puts the box's top edge exactly at cap height, so diacritics
-   that rise above it (the breve on Й, the dots on Ё) land outside the element's
-   own overflow clip and get shaved off.
-   The fix is 4px of padding to widen the clip, plus an equal negative margin so
-   the trimmed alignment and the 8px gap are unchanged. The padding and the
-   margin must be on different elements wherever a parent also clips: putting
-   both on the child pushes its padding above the parent, which then clips away
-   the very headroom the padding just created. */
+/* Cap-height trim puts the box's edges exactly at cap height and at the
+   baseline, so anything outside that band - diacritics rising above it (the
+   breve on Й, the dots on Ё) and every descender below it (у, р, д) - lands
+   outside the element's own overflow clip and gets shaved off.
+   The fix is 4px of padding at BOTH edges to widen the clip, plus equal
+   negative margins so the trimmed alignment and the 8px gap are unchanged.
+   Here the padding and the margin can share this element because its parent
+   does not clip; wherever a parent also clips, the negative margin has to move
+   onto the parent, since padding on the child would then be pushed outside the
+   parent and clipped away again. */
 .exercise-row__title {
-  padding-top: 4px;
-  margin: -4px 0 0;
+  padding: 4px 0;
+  margin: -4px 0;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;

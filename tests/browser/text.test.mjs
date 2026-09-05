@@ -48,8 +48,8 @@ lines.push('\n' + JSON.stringify(m, null, 1) + '\n');
 check('1: title is nowrap', m.every(r => r.titleWs === 'nowrap'));
 check('1: title has text-overflow: ellipsis', m.every(r => r.titleTo === 'ellipsis'));
 check('1: title clips its overflow', m.every(r => r.titleOv === 'hidden'));
-check('1: title renders exactly one line (8.7 cap + 4 pad)',
-  m.every(r => Math.abs(r.titleH - 12.7) < 0.6), m.map(r => r.titleH).join('/'));
+check('1: title renders exactly one line (8.7 cap + 4 pad above + 4 below)',
+  m.every(r => Math.abs(r.titleH - 16.7) < 0.6), m.map(r => r.titleH).join('/'));
 check('1: an over-long title is truncated', m[1].titleTruncated === true);
 check('1: a short title is not truncated', m[0].titleTruncated === false);
 

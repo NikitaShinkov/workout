@@ -34,10 +34,13 @@ const m = await page.evaluate(() => {
     titlePad: parseFloat(getComputedStyle(t).paddingTop),
     titleTrim: cs('.exercise-row__title').textBoxTrim || cs('.exercise-row__title').webkitTextBoxTrim,
     titleEdge: cs('.exercise-row__title').textBoxEdge,
-    // Content-edge gap: the raw box edges sit 4px closer because the clip
-    // headroom lives inside each box.
+    titlePadBottom: parseFloat(getComputedStyle(t).paddingBottom),
+    // Content-edge gap: the raw box edges sit closer together because the clip
+    // headroom lives inside each box - above the title's cap edge, below its
+    // baseline edge, and above the description's cap edge.
     titleToDesc: +(d.getBoundingClientRect().top + parseFloat(getComputedStyle(d).paddingTop)
-      - t.getBoundingClientRect().bottom).toFixed(1),
+      - (t.getBoundingClientRect().bottom - parseFloat(getComputedStyle(t).paddingBottom))
+    ).toFixed(1),
     imageBox: box('.exercise-row__image-box'),
     indicatorLabelH: +document.querySelector('.indicator__label').getBoundingClientRect().height.toFixed(1),
     toolbarLabelH: +document.querySelector('.toolbar-label').getBoundingClientRect().height.toFixed(1),
@@ -51,8 +54,13 @@ lines.push('\nmeasured: ' + JSON.stringify(m, null, 0) + '\n');
 // 1. cap-height trim
 check('1: title uses text-box-trim: trim-both', m.titleTrim === 'trim-both', m.titleTrim);
 check('1: title edge is cap alphabetic', /cap/.test(m.titleEdge) && /alphabetic/.test(m.titleEdge), m.titleEdge);
-check('1: title is one cap-height line plus clip headroom, not ~15px',
-  Math.abs(m.titleH - (8.7 + m.titlePad)) < 0.6, m.titleH + ' pad ' + m.titlePad);
+// Headroom at both edges: the cap edge would shave diacritics off the top and
+// the baseline edge would shave descenders off the bottom.
+check('1: title is one cap-height line plus clip headroom at both edges',
+  Math.abs(m.titleH - (8.7 + m.titlePad + m.titlePadBottom)) < 0.6,
+  m.titleH + ' pad ' + m.titlePad + '/' + m.titlePadBottom);
+check('1: the title has descender room below the baseline edge',
+  m.titlePadBottom >= 3, m.titlePadBottom);
 check('1: title-to-description gap is the specified 8px', Math.abs(m.titleToDesc - 8) < 0.6, m.titleToDesc);
 check('1: indicator label also trimmed to cap height', m.indicatorLabelH < 10.5, m.indicatorLabelH);
 check('1: toolbar label also trimmed', m.toolbarLabelH < 10.5, m.toolbarLabelH);

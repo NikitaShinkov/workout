@@ -345,8 +345,11 @@ function onRowDragStart(event, context, rowEl) {
   drag = { kind: context.scope, ids: draggedKeys(context.scope, context.key) };
 
   event.dataTransfer.setData('text/plain', drag.ids.join(','));
-  // A library row is copied into the schedule, not taken out of the list.
-  event.dataTransfer.effectAllowed = context.scope === 'library' ? 'copy' : 'move';
+  // A library row does BOTH: it is copied into the schedule, and moved when it
+  // is reordered within Exercise_list. Declaring only one of them makes Chrome
+  // reject the other outright - a no-drop cursor and no drop event at all, with
+  // nothing logged to say why.
+  event.dataTransfer.effectAllowed = context.scope === 'library' ? 'copyMove' : 'move';
 
   // Re-rendering here would destroy the node being dragged and abort the drag,
   // so the visual state is applied directly.
@@ -373,9 +376,52 @@ function clearDragClasses() {
 function endDrag() {
   clearDropMarkers();
   clearDragClasses();
+  stopAutoScroll();
   drag = null;
   rowDropTarget = null;
   complexDropTarget = null;
+}
+
+// --- edge auto-scroll while dragging ---------------------------------------
+//
+// A drag holds the pointer captured, so the wheel and the scrollbar are out of
+// reach: without this there is no way to reach a complex that is off-screen.
+// Only a drag scrolls a list on its own - a click or a reorder must never move
+// it under the user.
+
+const AUTO_SCROLL_EDGE = 56;   // px from the edge of the list that triggers it
+const AUTO_SCROLL_STEP = 10;   // px per tick
+const AUTO_SCROLL_TICK = 30;   // ms
+
+let autoScrollTimer = null;
+let autoScrollSelector = null;
+let autoScrollStep = 0;
+
+// Addressed by selector, not by node: a re-render mid-drag replaces the list,
+// and a timer holding the old node would scroll a detached element.
+function updateAutoScroll(selector, clientY) {
+  const list = root && root.querySelector(selector);
+  if (!list) return;
+
+  const box = list.getBoundingClientRect();
+  if (clientY < box.top + AUTO_SCROLL_EDGE) autoScrollStep = -AUTO_SCROLL_STEP;
+  else if (clientY > box.bottom - AUTO_SCROLL_EDGE) autoScrollStep = AUTO_SCROLL_STEP;
+  else { stopAutoScroll(); return; }
+
+  autoScrollSelector = selector;
+  if (autoScrollTimer !== null) return;
+  autoScrollTimer = setInterval(() => {
+    const node = root && root.querySelector(autoScrollSelector);
+    if (node) node.scrollTop += autoScrollStep;
+  }, AUTO_SCROLL_TICK);
+}
+
+function stopAutoScroll() {
+  if (autoScrollTimer === null) return;
+  clearInterval(autoScrollTimer);
+  autoScrollTimer = null;
+  autoScrollSelector = null;
+  autoScrollStep = 0;
 }
 
 // --- Exercise_list: reorder within the library ------------------------------
@@ -393,6 +439,8 @@ function onLibraryRowDragOver(event, index, rowEl) {
 
   clearDropMarkers();
   rowEl.classList.add(after ? 'exercise-row--drop-after' : 'exercise-row--drop-before');
+
+  updateAutoScroll('.exercise-list', event.clientY);
 }
 
 function onLibraryDrop(event) {
@@ -421,30 +469,53 @@ function complexBoundaryAt(list, clientY) {
   return nodes.length;
 }
 
+// How much of a complex's outer edge means "beside this complex" rather than
+// "inside it". Complexes are stacked flush, so without this band there would be
+// no way to aim at the boundary above the first complex, or at any boundary
+// between two of them - both would resolve to "the first slot in this complex".
+const BOUNDARY_BAND = 12;
+
 function onComplexListDragOver(event) {
   if (!drag) return;
 
   const list = event.currentTarget;
-  const row = event.target.closest && event.target.closest('.exercise-row');
-
   // A whole complex can only ever land between complexes, so it ignores the row
-  // under the cursor. An exercise dropped on a row lands inside that complex;
-  // anywhere else - the side block, a gap, the empty space - makes a new one.
-  if (drag.kind !== 'complex' && row) {
-    const box = row.getBoundingClientRect();
-    const after = event.clientY > box.top + box.height / 2;
-    complexDropTarget = {
-      type: 'item',
-      complexId: row.dataset.complexId,
-      index: Number(row.dataset.itemIndex) + (after ? 1 : 0),
-    };
-  } else {
-    complexDropTarget = { type: 'complex', index: complexBoundaryAt(list, event.clientY) };
-  }
+  // under the cursor.
+  const row = drag.kind === 'complex'
+    ? null
+    : event.target.closest && event.target.closest('.exercise-row');
+
+  complexDropTarget = row
+    ? itemTargetFor(list, row, event.clientY)
+    : { type: 'complex', index: complexBoundaryAt(list, event.clientY) };
 
   event.preventDefault();
   event.dataTransfer.dropEffect = drag.kind === 'library' ? 'copy' : 'move';
   paintComplexDropMarker(list);
+  updateAutoScroll('.complex-list', event.clientY);
+}
+
+// An exercise over a row lands inside that complex - except along the top edge
+// of its first row and the bottom edge of its last, which are the complex's own
+// outer edges and mean "a new complex here".
+function itemTargetFor(list, row, clientY) {
+  const box = row.getBoundingClientRect();
+  const complexes = Array.from(list.querySelectorAll('.complex'));
+  const index = complexes.indexOf(row.closest('.complex'));
+
+  if (!row.previousElementSibling && clientY < box.top + BOUNDARY_BAND) {
+    return { type: 'complex', index };
+  }
+  if (!row.nextElementSibling && clientY > box.bottom - BOUNDARY_BAND) {
+    return { type: 'complex', index: index + 1 };
+  }
+
+  const after = clientY > box.top + box.height / 2;
+  return {
+    type: 'item',
+    complexId: row.dataset.complexId,
+    index: Number(row.dataset.itemIndex) + (after ? 1 : 0),
+  };
 }
 
 function paintComplexDropMarker(list) {
@@ -515,6 +586,11 @@ function render() {
     selection = ids.size ? { ...selection, ids } : EMPTY_SELECTION;
   }
 
+  // Every render rebuilds both lists from scratch, which would otherwise send
+  // them back to the top - so selecting a row, flipping a switch or reordering
+  // a complex would yank the list out from under the user.
+  const scroll = captureScroll();
+
   stopAllRowAnimations();
   clear(root);
 
@@ -529,8 +605,30 @@ function render() {
 
   root.appendChild(el('div', { class: 'page' }, renderHeader(state), body));
 
+  restoreScroll(scroll);
+
   // The header was rebuilt, so the undo slot came back empty.
   refreshUndoSlot();
+}
+
+const SCROLLERS = ['.complex-list', '.exercise-list'];
+
+function captureScroll() {
+  const tops = {};
+  for (const selector of SCROLLERS) {
+    const node = root.querySelector(selector);
+    if (node) tops[selector] = node.scrollTop;
+  }
+  return tops;
+}
+
+function restoreScroll(tops) {
+  for (const selector of SCROLLERS) {
+    const node = root.querySelector(selector);
+    // A shorter list clamps this itself, which is the right answer: deleting
+    // the last complexes should not leave the view stranded past the end.
+    if (node && tops[selector]) node.scrollTop = tops[selector];
+  }
 }
 
 function renderHeader(state) {
@@ -1128,8 +1226,11 @@ function renderExerciseColumn(state, category) {
   list.addEventListener('dragover', (event) => {
     if (event.target === list && drag && drag.kind === 'library') {
       event.preventDefault();
+      // Must agree with effectAllowed, or the drop is silently refused.
+      event.dataTransfer.dropEffect = 'move';
       rowDropTarget = category.exercises.length;
       clearDropMarkers();
+      updateAutoScroll('.exercise-list', event.clientY);
     }
   });
   list.addEventListener('drop', (event) => {

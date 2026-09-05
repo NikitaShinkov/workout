@@ -59,9 +59,12 @@ sample its pixels. Both cases turned out to be "invert to white ground".
 
 1. **`text-box: trim-both cap alphabetic` + `overflow: hidden` clips glyphs.**
    The cap edge cuts diacritics (Й, Ё) off the top, the alphabetic edge cuts
-   descenders (у, р, д) off the bottom. Fix: padding for headroom on the child,
-   the compensating negative margin on the **clipping parent** — both on the
-   child pushes the padding outside the parent, which clips it away again.
+   descenders (у, р, д) off the bottom — **both edges need headroom**, which is
+   why `.exercise-row__title` carries `padding: 4px 0; margin: -4px 0`.
+   The padding goes on the element whose own `overflow` does the clipping; the
+   compensating negative margin goes on the **clipping parent** wherever a
+   parent clips too — both on the child pushes the padding outside the parent,
+   which clips it away again.
    Only use the trim where a box height feeds a gap; elsewhere `text-box: normal`.
 2. **Flex blockifies `display: -webkit-box`**, silently killing
    `-webkit-line-clamp`. A clamped paragraph must not itself be a flex item —
@@ -84,19 +87,41 @@ sample its pixels. Both cases turned out to be "invert to white ground".
    `.main` as an unbroken **flex** chain.
 9. **A re-render throws rows away** — destroy running hover animations first or
    their timers keep ticking against detached images.
-10. **Complexes need the 8px gap between them.** It is not decoration: it is the
-    only place "drop between two complexes" can be distinguished from "drop
-    inside one of them", since complexes are stacked blocks of full-width rows.
-    The other complex-level lane is `.complex__side`, which spans the full
-    height of the block.
+10. **Complexes are stacked flush, so "between two complexes" is a band, not a
+    place.** `BOUNDARY_BAND` (12px) at the top of a complex's first row and the
+    bottom of its last means "a new complex here"; everything between them
+    inserts into the complex. Without it there is no way to aim at the boundary
+    above the first complex — plain midpoint logic sends it into the first slot
+    of complex 0. `.complex__side` and the empty space below are the other two
+    complex-level lanes.
 11. **`position: sticky` with both `top: 0` and `bottom: 0`** is what parks the
-    Date_pointer against whichever edge of the list it has scrolled past. Note
-    that it only *sticks* when its natural position is actually outside the
+    Date_pointer against whichever edge of the list it has scrolled past. The
+    sticky element is the 2px rule itself, so it is the *rule* that lines up
+    with the edge of the list; the 14×18 marker is absolutely positioned on top
+    of it and simply overflows, and the list clips whichever half sticks out.
+    Note that it only *sticks* when its natural position is actually outside the
     scrollport — a test that scrolls too little just measures the natural
     position and proves nothing.
-12. **`page.mouse.drop()` leaves the left button down.** A second
+12. **A render rebuilds both lists, which resets `scrollTop` to 0.**
+    `captureScroll` / `restoreScroll` in `render()` carry it across; without
+    them a click, a switch or a reorder snapped the list back to the top.
+13. **A drag captures the pointer**, so the wheel and the scrollbar are out of
+    reach: `updateAutoScroll` scrolls a list while the cursor sits within 56px
+    of its top or bottom edge. It addresses the list by selector, not by node —
+    a re-render mid-drag replaces the element, and a timer holding the old one
+    would scroll a detached node.
+14. **`dropEffect` must be inside `effectAllowed` or the drop is refused** —
+    a no-drop cursor, no `drop` event, and nothing logged to say why. An
+    Exercise_list block is *copied* into the schedule but *moved* when reordered
+    in its own list, so its dragstart declares `copyMove`; declaring plain
+    `copy` silently killed reordering. **jsdom cannot catch this** — its
+    `dataTransfer` stub is a plain object with no such semantics — so a real
+    browser test guards it (`complex-drag`, section 0).
+15. **`page.mouse.drop()` leaves the left button down.** A second
     `page.mouse.drag()` in the same test then throws "'left' is already
-    pressed"; call `page.mouse.up()` after every drop.
+    pressed"; call `page.mouse.up()` after every drop. And `page.mouse.drag()`
+    hangs forever with no error if the start point is not over a draggable
+    element — a scrolled-out-of-view handle, for instance.
 
 ## Behaviour worth knowing
 
@@ -116,8 +141,8 @@ sample its pixels. Both cases turned out to be "invert to white ground".
   selection, which is what makes the spec's mutual-exclusion rules fall out for
   free and lets Del dispatch without guessing which list it means.
 - Dropping onto an exercise row inside a complex inserts into that complex;
-  dropping anywhere else in Complex_list — the side block, a gap, the empty
-  space below — makes a new complex at that boundary. Dragging a whole complex
+  dropping on a complex's outer 12px band, on the side block or in the empty
+  space below makes a new complex at that boundary. Dragging a whole complex
   always resolves to a boundary, whatever is under the cursor.
 - Complexes take schedule slots in list order, and only if their Switch is on.
   Switching one off shifts every later complex a slot earlier rather than
