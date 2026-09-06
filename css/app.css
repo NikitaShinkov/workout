@@ -1266,10 +1266,34 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   user-select: none;
 }
 
+/* The exercise on screen and its two neighbours, parked a block-width to either
+   side. The swipe translates the track, so the one arriving and the one leaving
+   move together; every transform here is written by js/workout-page.js, so
+   nothing in the stylesheet may set one. */
+.workout-preview__track {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.workout-preview__slide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+}
+
 /* contain, not the cover the popup's thumbnails use: this is the picture being
    worked from, so none of the pose may be cropped away. */
 .workout-preview__image .seq-anim__img {
   object-fit: contain;
+}
+
+/* The swipe still commits - it just arrives without the travel. */
+@media (prefers-reduced-motion: reduce) {
+  .workout-preview__track {
+    transition: none !important;
+  }
 }
 
 .workout-preview__empty {

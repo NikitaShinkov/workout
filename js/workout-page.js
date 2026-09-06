@@ -38,14 +38,35 @@ const DAY_LABELS = ['Сегодня', 'Завтра', 'Послезавтра'];
 // swipe rather than a tap.
 const SWIPE_MIN_PX = 40;
 
+// At the ends of a complex there is nothing to swipe to, so the block gives a
+// little and no more: it follows this fraction of the finger, up to this many
+// pixels, and springs back when the finger lifts. The end is felt, not hit.
+const EDGE_RESISTANCE = 0.28;
+const EDGE_MAX_PX = 56;
+
+// The settle once the finger lifts. Short, and sharper than the 1:1 tracking it
+// takes over from - it starts fast and decelerates into place, so the gesture
+// reads as completed rather than merely continued. The spring back from an end
+// has nothing to complete, so it is a touch longer and gentler.
+const SETTLE_MS = 200;
+const SETTLE_EASING = 'cubic-bezier(0.2, 0.85, 0.3, 1)';
+const SPRING_MS = 260;
+const SPRING_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
+
 // Transient, like the calendar's open tabs: a reload starts on today again.
 let selectedDay = 0;
 let selectedComplexId = null;
 let previewIndex = 0;
 
-// The running image sequence. A render throws its <img> away, so it is torn
-// down and rebuilt every time rather than left ticking against a detached node.
-let animation = null;
+// The running image sequences, one per rendered slide. A render throws their
+// <img>s away, so they are torn down and rebuilt every time rather than left
+// ticking against detached nodes.
+let animations = [];
+
+// The swipe in progress, and the timer that finishes it. Both hold nodes from
+// the current render, so both are dropped whenever the page is rebuilt.
+let drag = null;
+let settleTimer = null;
 
 let root = null;
 let onNavigate = null;
@@ -59,17 +80,24 @@ export function mountWorkoutPage(container, navigate) {
 
   return function destroy() {
     unsubscribe();
-    stopAnimation();
+    stopAnimations();
+    cancelSettle();
+    drag = null;
     clear(root);
     root = null;
     onNavigate = null;
   };
 }
 
-function stopAnimation() {
-  if (!animation) return;
-  animation.destroy();
-  animation = null;
+function stopAnimations() {
+  for (const animation of animations) animation.destroy();
+  animations = [];
+}
+
+function cancelSettle() {
+  if (settleTimer === null) return;
+  clearTimeout(settleTimer);
+  settleTimer = null;
 }
 
 // --- the data behind the page ----------------------------------------------
@@ -170,7 +198,11 @@ function render() {
   }
   if (card) previewIndex = Math.min(previewIndex, Math.max(0, card.exercises.length - 1));
 
-  stopAnimation();
+  stopAnimations();
+  // Everything a gesture in flight is holding belongs to the render about to be
+  // thrown away, so it cannot survive one.
+  cancelSettle();
+  drag = null;
   clear(root);
 
   root.appendChild(
@@ -188,7 +220,7 @@ function render() {
     )
   );
 
-  startAnimation(card);
+  startAnimations(card);
 }
 
 // The same categories block as the other two pages, in the same place, so
@@ -286,9 +318,30 @@ function selectDay(offset) {
 
 // image_block plus its Preview_bar. The bar has one segment per exercise in the
 // selected complex, so it says both where you are and how much is left.
+//
+// The block is a viewport over a track carrying the exercise on screen and its
+// two neighbours, parked one block-width to either side. The swipe slides the
+// track, so the one arriving and the one leaving move together and the gesture
+// has something to follow - see attachSwipe.
 function renderPreview(card) {
   const exercises = card ? card.exercises : [];
   const current = exercises[previewIndex] || null;
+
+  const track = el(
+    'div',
+    { class: 'workout-preview__track' },
+    // Only the neighbours that exist: at either end of a complex there is
+    // nothing to bring in, which is exactly what the resistance says.
+    [previewIndex - 1, previewIndex, previewIndex + 1]
+      .filter((index) => exercises[index])
+      .map((index) =>
+        el('div', {
+          class: 'workout-preview__slide',
+          dataset: { index: String(index) },
+          style: { left: (index - previewIndex) * 100 + '%' },
+        })
+      )
+  );
 
   const image = el(
     'div',
@@ -296,10 +349,10 @@ function renderPreview(card) {
       class: 'workout-preview__image',
       'aria-label': current ? current.name : 'Нет выбранного комплекса',
     },
-    current ? null : el('span', { class: 'workout-preview__empty', text: 'Выберите комплекс' })
+    current ? track : el('span', { class: 'workout-preview__empty', text: 'Выберите комплекс' })
   );
 
-  attachSwipe(image, exercises.length);
+  if (current) attachSwipe(image, track, exercises.length);
 
   return el(
     'div',
@@ -322,33 +375,96 @@ function renderPreview(card) {
 // A horizontal drag across image_block steps through the complex. It does not
 // wrap: swiping right on the first exercise and left on the last are both
 // no-ops, so the ends of a complex are felt rather than looped past.
-function attachSwipe(node, count) {
-  let startX = null;
+//
+// The track follows the finger 1:1 while the gesture is live and is only
+// committed once it ends - re-rendering mid-gesture would replace the very node
+// being dragged, which is the same rule the schedule page's drag lives by.
+function attachSwipe(viewport, track, count) {
+  viewport.addEventListener('pointerdown', (event) => {
+    // A settle in flight owns the track until it lands, and a second finger
+    // must not fight the first.
+    if (drag || settleTimer !== null) return;
+    // Left button only: a right-click is not a swipe.
+    if (event.button) return;
 
-  node.addEventListener('pointerdown', (event) => {
-    startX = event.clientX;
+    drag = {
+      startX: event.clientX,
+      track,
+      count,
+      // Read once: this is what a full slide of travel means, and it cannot
+      // change mid-gesture.
+      width: viewport.getBoundingClientRect().width || 1,
+    };
+    // The finger drives it directly from here; nothing may smooth that.
+    track.style.transition = 'none';
+
+    // So the gesture keeps its events even when the finger leaves the block.
+    if (typeof viewport.setPointerCapture === 'function' && event.pointerId !== undefined) {
+      try { viewport.setPointerCapture(event.pointerId); } catch { /* not capturable */ }
+    }
   });
-  node.addEventListener('pointercancel', () => {
-    startX = null;
+
+  viewport.addEventListener('pointermove', (event) => {
+    if (!drag) return;
+    track.style.transform = 'translateX(' + followed(event.clientX - drag.startX) + 'px)';
   });
-  node.addEventListener('pointerup', (event) => {
-    if (startX === null) return;
 
-    const travelled = event.clientX - startX;
-    startX = null;
-    if (Math.abs(travelled) < SWIPE_MIN_PX) return;
+  viewport.addEventListener('pointerup', (event) => {
+    if (!drag) return;
+    release(event.clientX - drag.startX);
+  });
 
-    // Swipe left (the content moves left, under the finger) = the next one.
-    stepPreview(travelled < 0 ? 1 : -1, count);
+  // The browser took the gesture over - a native drag, a scroll. Put it back.
+  viewport.addEventListener('pointercancel', () => {
+    if (drag) release(0);
   });
 }
 
-function stepPreview(step, count) {
-  const next = previewIndex + step;
-  if (next < 0 || next >= count) return;
+// How far the track actually moves for a given travel of the finger: all of it
+// while there is something to bring in, a damped fraction of it when there is
+// not, so the end of a complex resists rather than stops dead.
+function followed(travelled) {
+  const wanted = previewIndex + (travelled < 0 ? 1 : -1);
+  if (wanted >= 0 && wanted < drag.count) return travelled;
 
-  previewIndex = next;
-  render();
+  return Math.sign(travelled) * Math.min(Math.abs(travelled) * EDGE_RESISTANCE, EDGE_MAX_PX);
+}
+
+// The finger has lifted. Either the track carries on to the next slide and the
+// index follows it there, or it goes back where it started.
+function release(travelled) {
+  const { track, count, width } = drag;
+  drag = null;
+
+  const step = travelled <= -SWIPE_MIN_PX ? 1 : travelled >= SWIPE_MIN_PX ? -1 : 0;
+  const target = previewIndex + step;
+  const commits = step !== 0 && target >= 0 && target < count;
+
+  if (!commits) {
+    // Not far enough, or nothing there to go to. Either way the block is
+    // sitting off-centre and has to come back.
+    glide(track, 0, SPRING_MS, SPRING_EASING);
+    settleTimer = setTimeout(() => {
+      settleTimer = null;
+      track.style.transition = '';
+    }, SPRING_MS);
+    return;
+  }
+
+  // The next slide is parked one width to the right, the previous one to the
+  // left, so bringing either into view moves the track the other way.
+  glide(track, -step * width, SETTLE_MS, SETTLE_EASING);
+  settleTimer = setTimeout(() => {
+    settleTimer = null;
+    previewIndex = target;
+    // The render rebuilds the track around the new index, back at zero.
+    render();
+  }, SETTLE_MS);
+}
+
+function glide(track, x, ms, easing) {
+  track.style.transition = 'transform ' + ms + 'ms ' + easing;
+  track.style.transform = 'translateX(' + x + 'px)';
 }
 
 function renderComplexList(day, selected) {
@@ -415,15 +531,20 @@ function selectComplex(id) {
   render();
 }
 
-function startAnimation(card) {
-  const exercise = card ? card.exercises[previewIndex] : null;
-  if (!exercise || !exercise.images.length) return;
+// One sequence per rendered slide, so the exercise arriving is already playing
+// as it slides in rather than coming to life once it lands. At most three run
+// at a time - the one on screen and its two neighbours.
+function startAnimations(card) {
+  if (!card) return;
 
-  const box = root.querySelector('.workout-preview__image');
-  if (!box) return;
+  for (const slide of root.querySelectorAll('.workout-preview__slide')) {
+    const exercise = card.exercises[Number(slide.dataset.index)];
+    if (!exercise || !exercise.images.length) continue;
 
-  animation = createSequenceAnimation(box);
-  animation.setFrames(exercise.images.map(blobUrl));
+    const animation = createSequenceAnimation(slide);
+    animation.setFrames(exercise.images.map(blobUrl));
+    animations.push(animation);
+  }
 }
 
 // Exposed for the tests: a fresh page starts on today, with nothing chosen.

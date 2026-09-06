@@ -214,7 +214,13 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     frame itself, and on an exercise row it was hijacking the row's own drag
     too. `user-select: none` on the container handles the other cancel source,
     a text-selection gesture.
-19. **`flex: 1 1 0` does not make two siblings equal if one has padding.** With
+19. **A gesture that commits on a timer needs the timer, not `transitionend`.**
+    jsdom runs no transitions, so `transitionend` never fires there and the
+    swipe would never commit. `release()` starts the CSS transition and sets a
+    `setTimeout` for the same duration; the timeout is what moves
+    `previewIndex` and re-renders. It is cancelled by `render()` and by the
+    page teardown, because it holds a node from the render it started in.
+20. **`flex: 1 1 0` does not make two siblings equal if one has padding.** With
     `box-sizing: border-box` a flex base size of 0 cannot resolve below the
     element's own padding, so `padding: 20px` made the workout page's
     Complex_list exactly 40px taller than the image_block beside it. Put that
@@ -261,6 +267,12 @@ is active, and the selector reads as "somewhere else you can go".
   It shows **every category's** complexes for the chosen day, so it reads
   `buildCalendar()` the way the calendar does; `buildWorkoutDays()` is exported
   and is where all the arithmetic lives, which is what `jsdom/workout` tests.
+  image_block is a **viewport over a track** carrying the exercise on screen and
+  its two neighbours, parked a block-width to either side. The swipe translates
+  the track 1:1 under the finger and is only committed when the finger lifts -
+  re-rendering mid-gesture would replace the node being dragged, the same rule
+  the schedule page's drag lives by. Every rendered slide plays, so at most
+  three sequences run and the arriving exercise is already alive.
   Its header is the same `.categories` block in the same place — no
   view_options, since neither the indicators nor the favourites column has
   anything to act on here.
@@ -337,6 +349,14 @@ else.
   which a naive `n % 10` gets wrong (`11 упражнений`, not `11 упражнение`).
 - The workout page's **Начать appears only on today's blocks**. It is rendered
   `disabled` because the page it would open does not exist.
+- **The swipe is a carousel, not a swap.** The track follows the finger 1:1
+  while there is a neighbour to bring in; at either end of a complex it follows
+  only `EDGE_RESISTANCE` (0.28) of the travel, capped at `EDGE_MAX_PX` (56), so
+  the end is felt rather than hit. On release it either glides on to the next
+  slide (200ms, an ease-out that starts fast so the gesture reads as finished)
+  or springs back (260ms, gentler). `previewIndex` changes when that timer
+  lands, NOT on pointerup — so a test has to wait the settle out before
+  asserting anything about which exercise is showing.
 
 ## Not built yet, by design
 
@@ -363,6 +383,9 @@ whenever the plan allows a call again:
   area with the frame `object-fit: contain`ed into it — no ground, no border, no
   radius — on the grounds that this is the picture being worked from, so none of
   the pose may be cropped and nothing should compete with it.
+- **The swipe's numbers.** 200ms / 260ms, the two easing curves, and the 0.28 /
+  56px edge resistance were all chosen to read as "short, smooth and
+  unobtrusive"; none of them came from a design file.
 - **The workout page's vertical rhythm.** "Upper half / lower half" is read as
   the two blocks splitting whatever the Date_selector leaves, and the 40px the
   Date_selector carries in Figma is treated as the top inset (so `.page--workout`
@@ -377,7 +400,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 20 suites, ~735 checks, ~90s
+npm test             all 20 suites, ~750 checks, ~95s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```

@@ -20,7 +20,7 @@ npm install
 npm test
 ```
 
-20 suites, about 730 checks, ~90 seconds. The logic suites run under jsdom; the
+20 suites, about 750 checks, ~95 seconds. The logic suites run under jsdom; the
 layout ones drive the Chrome or Edge already installed on the machine (set
 `CHROME_PATH` if it is somewhere unusual). `npm test -- jsdom` runs a subset.
 
@@ -64,8 +64,10 @@ Stage 2 — complexes, a schedule, and two more pages:
 - **Calendar** page — every category's schedule laid out by day, read-only.
 - **Workout** page — the complexes scheduled for today, tomorrow and the day
   after, with the selected complex's exercises animated above the list and a
-  swipe to walk through them. Built for a phone: on a narrow screen it drops the
-  header entirely, and `index.html#workout` opens it directly.
+  swipe to walk through them — the next exercise slides in as the current one
+  slides out, following the finger, and the ends of a complex resist and spring
+  back. Built for a phone: on a narrow screen it drops the header entirely, and
+  `index.html#workout` opens it directly.
 
 Not built yet, by design: cyclic schedule rotation, feedback capture, the
 exercise-execution page behind the workout page's `Начать` button, and syncing

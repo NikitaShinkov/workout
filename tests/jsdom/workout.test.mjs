@@ -36,6 +36,8 @@ function check(name, condition, detail) {
   }
 }
 
+const near = (a, b) => Math.abs(a - b) < 0.001;
+
 const errors = [];
 dom.window.addEventListener('error', (e) => errors.push(String(e.message)));
 console.error = (...args) => { errors.push(args.map(String).join(' ')); };
@@ -197,34 +199,106 @@ check('the first is the one showing', activeSegment() === 0, activeSegment());
 check('the image block plays the exercise back',
   Boolean($('.workout-preview__image .seq-anim__img')));
 
+// --- the track ---
+//
+// The exercise on screen and its neighbours ride one track, so the arriving and
+// the departing block move together under the finger.
+const slides = () => $$('.workout-preview__slide').map((s) => Number(s.dataset.index));
+// The inline transform the swipe writes; jsdom has no layout engine, but these
+// are px the page computed itself, so they are readable.
+const trackX = () => {
+  const track = $('.workout-preview__track');
+  const match = /translateX\((-?[\d.]+)px\)/.exec(track ? track.style.transform : '');
+  return match ? Number(match[1]) : 0;
+};
+
+check('THE TRACK CARRIES THE NEIGHBOURS, not just the exercise on screen',
+  slides().join(',') === '0,1', slides().join(','));
+check('it starts unmoved', trackX() === 0, trackX());
+check('and every slide on it is playing',
+  $$('.workout-preview__slide .seq-anim__img').length === 2,
+  $$('.workout-preview__slide .seq-anim__img').length);
+
 // --- swiping ---
 //
-// Left = the next exercise, right = the previous one, and neither wraps.
-function swipe(dx) {
-  const box = $('.workout-preview__image');
-  box.dispatchEvent(new dom.window.MouseEvent('pointerdown', { bubbles: true, clientX: 200 }));
-  box.dispatchEvent(new dom.window.MouseEvent('pointerup', { bubbles: true, clientX: 200 + dx }));
+// Left = the next exercise, right = the previous one, and neither wraps. The
+// gesture is only committed once the finger lifts and the track has settled, so
+// every swipe here has to wait that out.
+const box = () => $('.workout-preview__image');
+const pointer = (type, x) => box().dispatchEvent(
+  new dom.window.MouseEvent(type, { bubbles: true, clientX: x }));
+
+// Longer than both the settle (200ms) and the spring back (260ms).
+const settled = () => new Promise((r) => setTimeout(r, 340));
+
+async function swipe(dx) {
+  pointer('pointerdown', 200);
+  pointer('pointermove', 200 + dx);
+  pointer('pointerup', 200 + dx);
+  await settled();
 }
 
-swipe(-10);
+// The finger drives the track directly while the gesture is live.
+pointer('pointerdown', 200);
+pointer('pointermove', 140);
+check('THE TRACK FOLLOWS THE FINGER 1:1 while there is somewhere to go',
+  trackX() === -60, trackX());
+check('and nothing is smoothing it mid-gesture',
+  $('.workout-preview__track').style.transition === 'none',
+  $('.workout-preview__track').style.transition);
+// Reversing into the end of the complex picks up the resistance mid-gesture:
+// exercise 0 has nothing to its left, so a swipe right is damped from the
+// moment the finger crosses back over the start.
+pointer('pointermove', 260);
+check('and picks up the resistance the moment it turns towards an end',
+  near(trackX(), 60 * 0.28), trackX());
+pointer('pointerup', 200);
+await settled();
+check('a gesture that ends where it started changes nothing',
+  activeSegment() === 0 && trackX() === 0, activeSegment() + '/' + trackX());
+
+await swipe(-10);
 check('a short drag is a tap, not a swipe', activeSegment() === 0, activeSegment());
 
-swipe(-120);
+await swipe(-120);
 check('SWIPING LEFT MOVES TO THE NEXT EXERCISE', activeSegment() === 1, activeSegment());
+check('and the track is back at rest around the new one',
+  trackX() === 0 && slides().join(',') === '0,1', trackX() + ' ' + slides().join(','));
 
-swipe(-120);
+// At the end of the complex there is nothing to bring in, so the block gives a
+// little and springs back rather than stopping dead.
+pointer('pointerdown', 200);
+pointer('pointermove', 100);
+check('AT THE END THE BLOCK ONLY GIVES A LITTLE - a damped fraction of the finger',
+  near(trackX(), -100 * 0.28), trackX());
+pointer('pointermove', 0);
+check('and never more than the cap, however far the finger goes',
+  trackX() === -56, trackX());
+pointer('pointerup', 0);
+check('the spring back is a transition, not a jump',
+  /transform \d+ms/.test($('.workout-preview__track').style.transition),
+  $('.workout-preview__track').style.transition);
+await settled();
+
 check('SWIPING LEFT ON THE LAST ONE DOES NOT WRAP TO THE FIRST',
   activeSegment() === 1, activeSegment());
+check('IT SPRINGS BACK TO WHERE IT STARTED', trackX() === 0, trackX());
 
-swipe(120);
+await swipe(120);
 check('swiping right moves back', activeSegment() === 0, activeSegment());
 
-swipe(120);
+// The other end resists the same way.
+pointer('pointerdown', 200);
+pointer('pointermove', 400);
+check('the first exercise resists a swipe right', trackX() === 56, trackX());
+pointer('pointerup', 400);
+await settled();
 check('SWIPING RIGHT ON THE FIRST ONE DOES NOT WRAP TO THE LAST',
   activeSegment() === 0, activeSegment());
+check('and it springs back here too', trackX() === 0, trackX());
 
 // --- selecting another complex ---
-swipe(-120);
+await swipe(-120);
 cards()[1].dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
 check('clicking a block makes it the active one',
   cards()[1].classList.contains('workout-complex--active')
@@ -275,7 +349,12 @@ check('A MUTATION AFTER DESTROY RENDERS NOTHING',
   document.getElementById('app').children.length === 0,
   document.getElementById('app').innerHTML.slice(0, 80));
 
-check('no errors logged', errors.length === 0, errors.join(' | '));
+// indexedDB is deliberately left undefined here, so db.js reports that it
+// cannot save - which is the graceful degradation it is meant to do, and is
+// the one thing the page is allowed to complain about.
+const unexpected = errors.filter((e) => !/indexedDB is not defined/.test(e));
+check('no errors beyond the missing database', unexpected.length === 0,
+  unexpected.join(' | '));
 
 console.log(results.join('\n'));
 process.exit(failures === 0 ? 0 : 1);

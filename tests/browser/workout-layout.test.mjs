@@ -250,13 +250,30 @@ const centre = await box('.workout-preview__image');
 const y = centre.top + centre.height / 2;
 const mid = centre.left + centre.width / 2;
 
+// The x the track has actually been painted at, read off the live transform
+// matrix rather than the inline style - this is what the eye sees.
+const paintedX = () => page.evaluate(() => {
+  const track = document.querySelector('.workout-preview__track');
+  if (!track) return null;
+  const t = getComputedStyle(track).transform;
+  if (!t || t === 'none') return 0;
+  return +new DOMMatrixReadOnly(t).m41.toFixed(1);
+});
+const slideOffsets = () => page.$$eval('.workout-preview__slide', (n) => n.map((s) => {
+  const r = s.getBoundingClientRect();
+  return { index: s.dataset.index, left: +r.left.toFixed(0), width: +r.width.toFixed(0) };
+}));
+
+// Longer than both the settle (200ms) and the spring back (260ms).
+const settled = () => new Promise((r) => setTimeout(r, 420));
+
 const swipe = async (dx) => {
   await page.mouse.move(mid, y);
   await page.mouse.down();
   await page.mouse.move(mid + dx / 2, y);
   await page.mouse.move(mid + dx, y);
   await page.mouse.up();
-  await new Promise((r) => setTimeout(r, 250));
+  await settled();
 };
 
 check('7: the preview is playing the first exercise', Boolean(await frameSrc()));
@@ -264,23 +281,93 @@ check('7: a horizontal drag here is not claimed by the browser as a pan',
   (await style('.workout-preview__image', 'touchAction')) === 'pan-y',
   await style('.workout-preview__image', 'touchAction'));
 
-await swipe(-10);
-check('7: a short drag is a tap, not a swipe', (await activeSegment()) === 0, await activeSegment());
+// The track carries the exercise on screen and its neighbours, parked exactly a
+// block-width to either side - that is what makes one slide in as the other
+// slides out instead of the picture simply being swapped.
+const parked = await slideOffsets();
+lines.push('\nslides at rest: ' + JSON.stringify(parked) + '\n');
+check('7: the neighbours are on the track, one block-width away',
+  parked.length === 2 && parked[0].index === '0'
+    && Math.abs((parked[1].left - parked[0].left) - parked[0].width) < 1,
+  JSON.stringify(parked));
+check('7: and the block clips them until they are swiped in',
+  (await style('.workout-preview__image', 'overflow')) === 'hidden',
+  await style('.workout-preview__image', 'overflow'));
+check('7: the track starts unmoved', (await paintedX()) === 0, await paintedX());
 
-await swipe(-150);
+// --- the gesture follows the finger, before it is committed ---
+
+await page.mouse.move(mid, y);
+await page.mouse.down();
+await page.mouse.move(mid - 60, y);
+check('7: THE TRACK FOLLOWS THE FINGER 1:1 while the gesture is live',
+  Math.abs((await paintedX()) - -60) < 1, await paintedX());
+check('7: with nothing smoothing it mid-gesture',
+  (await style('.workout-preview__track', 'transitionDuration')) === '0s',
+  await style('.workout-preview__track', 'transitionDuration'));
+check('7: THE NEXT EXERCISE IS ALREADY ON SCREEN, sliding in behind the finger',
+  (await slideOffsets())[1].left < centre.right - 1,
+  JSON.stringify(await slideOffsets()));
+check('7: and it is already playing, not a frozen still',
+  (await page.$$('.workout-preview__slide .seq-anim__img')).length === 2,
+  (await page.$$('.workout-preview__slide .seq-anim__img')).length);
+await shot('workout-mid-swipe', '.workout-preview');
+
+// Releasing hands it to a short, sharper transition rather than a jump.
+await page.mouse.move(mid - 150, y);
+await page.mouse.up();
+const settling = await page.evaluate(() => {
+  const s = getComputedStyle(document.querySelector('.workout-preview__track'));
+  return { duration: s.transitionDuration, property: s.transitionProperty, easing: s.transitionTimingFunction };
+});
+lines.push('\nsettle: ' + JSON.stringify(settling) + '\n');
+check('7: RELEASING TRANSITIONS THE TRACK HOME rather than snapping it',
+  settling.property === 'transform' && settling.duration === '0.2s',
+  JSON.stringify(settling));
+check('7: and it is short enough to stay unobtrusive',
+  parseFloat(settling.duration) <= 0.3, settling.duration);
+await settled();
+
 check('7: SWIPING LEFT SHOWS THE NEXT EXERCISE', (await activeSegment()) === 1,
   await activeSegment());
+check('7: the track is back at rest around the new one', (await paintedX()) === 0,
+  await paintedX());
 
-await swipe(-150);
+await swipe(-10);
+check('7: a short drag is a tap, not a swipe', (await activeSegment()) === 1,
+  await activeSegment());
+check('7: and it settles back to centre', (await paintedX()) === 0, await paintedX());
+
+// --- the ends of the complex resist, then spring back ---
+
+await page.mouse.move(mid, y);
+await page.mouse.down();
+await page.mouse.move(mid - 200, y);
+const resisted = await paintedX();
+check('7: AT THE END THE BLOCK ONLY GIVES A LITTLE, and in the swipe direction',
+  resisted < 0 && Math.abs(resisted) < 200 * 0.5, resisted);
+check('7: never more than the cap', Math.abs(resisted) <= 56.5, resisted);
+await page.mouse.up();
+await settled();
+
 check('7: SWIPING LEFT ON THE LAST ONE DOES NOT WRAP', (await activeSegment()) === 1,
   await activeSegment());
+check('7: IT SPRINGS BACK TO WHERE IT STARTED', (await paintedX()) === 0, await paintedX());
 
 await swipe(150);
 check('7: swiping right goes back', (await activeSegment()) === 0, await activeSegment());
 
-await swipe(150);
+await page.mouse.move(mid, y);
+await page.mouse.down();
+await page.mouse.move(mid + 200, y);
+const resistedRight = await paintedX();
+check('7: the first exercise resists a swipe right the same way',
+  resistedRight > 0 && resistedRight <= 56.5, resistedRight);
+await page.mouse.up();
+await settled();
 check('7: SWIPING RIGHT ON THE FIRST ONE DOES NOT WRAP', (await activeSegment()) === 0,
   await activeSegment());
+check('7: and springs back here too', (await paintedX()) === 0, await paintedX());
 
 // ---------- 8. the phone ----------
 
