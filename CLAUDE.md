@@ -118,6 +118,16 @@ sample its pixels. Both cases turned out to be "invert to white ground".
 2. **Flex blockifies `display: -webkit-box`**, silently killing
    `-webkit-line-clamp`. A clamped paragraph must not itself be a flex item —
    wrap it. (`.exercise-row__subtitle-box` exists only for this.)
+   And **`-webkit-line-clamp` does not drop the lines past the limit** — it lays
+   them out and leans on `overflow: hidden` to hide them. So gotcha 1's padding
+   trick is unusable on a clamped element: widening the clip for the last line's
+   descenders widens it for the next line's ascenders too, and 4px was enough to
+   show a row of glyph tops. Move the **trim edge** instead —
+   `.exercise-row__subtitle` uses `text-box: trim-both cap text`, whose under
+   edge is the font's descent rather than the baseline. That reaches the
+   descenders and stops short of the next line's box, and leaves the over edge
+   on `cap` so the 8px gap up to the title is untouched. `browser/text` section
+   4 pins both sides of that window.
 3. **`text-overflow: ellipsis` does nothing on a flex container** — it clips
    mid-glyph instead. Keep such elements block boxes; centre with `line-height`.
 4. Standard `line-clamp` and `max-lines` are **not supported** in Chrome 152
@@ -294,20 +304,11 @@ whenever the plan allows a call again:
   reads as unavailable. Both are choices, not the design's.
 - **Category_block** on a calendar day — a tab strip reusing `.menu-button`.
 
-## Known issue
-
-`.exercise-row__subtitle` clips its last visible line's descenders, the same
-defect gotcha 1 describes and the title has been fixed for. Harder here: the
-clipping parent `.exercise-row__subtitle-box` is a `flex: 1 1 0` item with
-`box-sizing: border-box`, so the compensating negative margin has to go on the
-parent and interacts with flex height resolution. Visible in any row whose
-description reaches the bottom of its box.
-
 ## Testing
 
 ```
 npm install          once
-npm test             all 18 suites, ~640 checks, ~85s
+npm test             all 18 suites, ~650 checks, ~85s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -339,7 +340,7 @@ covers behaviour that is easy to break silently.
 - Screenshots land in `tests/.out/` (gitignored) — read them when a layout
   assertion looks suspicious.
 
-Three lessons paid for in debugging:
+Five lessons paid for in debugging:
 
 1. Assert **rendered** geometry, not `scrollHeight` — that is the *unclamped*
    height, so a working clamp still reads as "3 lines".
@@ -348,5 +349,13 @@ Three lessons paid for in debugging:
 3. Look at the screenshots. Two real bugs — the dead line-clamp and the close
    button landing under the cursor after a delete — were found by eye while the
    assertions were passing.
+4. **Never use `:nth-of-type` / `:last-of-type` inside `.complex-list`.** The
+   Date_pointer is a `div` sibling of the complexes, so it counts, and *where*
+   it sits depends on today's date — a suite written on one day started failing
+   on the next. Address complexes with `.complex-list .complex` and index.
+5. When a fix is a guess about how a CSS feature behaves, **write the test that
+   would fail on the wrong guess and run it against the wrong version.** The
+   descender fix was attempted twice; only reverting each attempt under the new
+   assertions showed which one actually held.
 
 Adding `"type": "module"` to package.json is why `dev-server.js` uses `import`.

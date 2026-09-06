@@ -72,6 +72,60 @@ check('3: description never exceeds its box', m.every(r => r.descWithinBox));
 check('3: description never spills past the row content box',
   m.every(r => r.descWithinRow), m.map(r => r.descWithinRow).join('/'));
 
+// 4. descenders on the LAST rendered line are not shaved off
+//
+// The clip that keeps line three hidden is the same clip that used to cut у, р,
+// д and ц off the second line, because the under trim edge sat on its baseline.
+// Padding cannot buy room here: -webkit-line-clamp lays the extra lines out and
+// relies on `overflow: hidden` to hide them, so widening the clip by 4px showed
+// their tops. Moving the edge to `text` grows the box by the font's descent
+// alone - past the descenders, short of the next line's box.
+const clamp = await page.evaluate(() => {
+  const sub = document.querySelectorAll('.exercise-row__subtitle')[1];
+  const box = sub.getBoundingClientRect();
+
+  // One rect per laid-out line, hidden ones included - but the clamped line
+  // comes back twice, once per fragment either side of its ellipsis, so they
+  // are collapsed by their top edge.
+  const range = document.createRange();
+  range.selectNodeContents(sub);
+  const byTop = new Map();
+  for (const r of range.getClientRects()) {
+    if (r.height > 1) byTop.set(r.top.toFixed(2), r);
+  }
+  const rows = [...byTop.values()].sort((a, b) => a.top - b.top);
+
+  const measure = (edge) => {
+    sub.style.textBoxEdge = edge;
+    const h = sub.getBoundingClientRect().height;
+    sub.style.textBoxEdge = '';
+    return +h.toFixed(2);
+  };
+
+  return {
+    edge: getComputedStyle(sub).textBoxEdge,
+    lines: rows.length,
+    lastVisibleBottom: rows[1] ? +rows[1].bottom.toFixed(2) : null,
+    nextLineTop: rows[2] ? +rows[2].top.toFixed(2) : null,
+    clipBottom: +box.bottom.toFixed(2),
+    withText: measure('cap text'),
+    withAlphabetic: measure('cap alphabetic'),
+  };
+});
+lines.push('\nclamp: ' + JSON.stringify(clamp) + '\n');
+
+check('4: the under trim edge is `text`, not `alphabetic`',
+  clamp.edge === 'cap text', clamp.edge);
+check('4: which is what makes the box taller than the baseline edge would',
+  clamp.withText > clamp.withAlphabetic, clamp.withText + ' vs ' + clamp.withAlphabetic);
+check('4: there IS a third line laid out to be hidden', clamp.lines >= 3, clamp.lines);
+check('4: DESCENDERS ON THE LAST LINE ARE INSIDE THE CLIP',
+  clamp.clipBottom >= clamp.lastVisibleBottom - 1,
+  clamp.clipBottom + ' vs line 2 bottom ' + clamp.lastVisibleBottom);
+check('4: AND THE THIRD LINE IS STILL CUT OFF',
+  clamp.clipBottom <= clamp.nextLineTop + 0.1,
+  clamp.clipBottom + ' vs line 3 top ' + clamp.nextLineTop);
+
 check('no page errors', errs.length === 0, errs.join(' | '));
 await browser.close();
 console.log(lines.join('\n'));

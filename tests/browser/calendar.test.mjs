@@ -292,20 +292,33 @@ const firstDayRows = () => page.evaluate(() => {
   const day = document.querySelector('.complex');
   return [...day.querySelectorAll('.exercise-row__title')].map((t) => t.textContent);
 });
+// Which tab each day has open. NOT addressed with :last-of-type - the
+// Date_pointer is a div sibling of the complexes, so it can be the last one of
+// its type, and where it sits depends on today's date.
+const openTabs = () => page.$$eval('.complex-list .complex',
+  (days) => days.map((d) => {
+    const active = d.querySelector('.category-block .menu-button--active .menu-button__label');
+    return active ? active.textContent : null;
+  }));
+
 const before = await firstDayRows();
+const tabsBefore = await openTabs();
 await page.evaluate(() => {
-  const day = document.querySelector('.complex');
+  const day = document.querySelector('.complex-list .complex');
   [...day.querySelectorAll('.category-block .menu-button')]
     .find((b) => !b.classList.contains('menu-button--active')).click();
 });
 await new Promise((r) => setTimeout(r, 250));
 const after = await firstDayRows();
+const tabsAfter = await openTabs();
 
 check('3: THE TAB SWITCHES THE DAY TO THE OTHER CATEGORY',
   after.join(',') !== before.join(','), before.join(',') + ' -> ' + after.join(','));
-check('3: only that day changed - the others keep their own tab',
-  (await page.$eval('.complex:last-of-type .category-block .menu-button--active',
-    (n) => n.textContent)).length > 0);
+check('3: that day now shows the other category',
+  tabsAfter[0] !== tabsBefore[0], tabsBefore[0] + ' -> ' + tabsAfter[0]);
+check('3: and ONLY that day changed - the rest keep their own tab',
+  tabsAfter.slice(1).join(',') === tabsBefore.slice(1).join(','),
+  tabsBefore.join(',') + ' -> ' + tabsAfter.join(','));
 await shot('calendar-tab-switched', '.complex-list');
 
 // ---------- 4. back to the schedule ----------

@@ -899,9 +899,21 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   overflow: hidden;
 }
 
+/* The under edge is `text`, not the page-wide `alphabetic`: alphabetic puts the
+   box's bottom exactly on the LAST line's baseline, so у, р, д and ц hung
+   outside the paragraph's own clip and were shaved off.
+   Padding cannot fix this one the way it fixes the title, because
+   -webkit-line-clamp does NOT drop the lines past the second - it lays them out
+   and leans on `overflow: hidden` to hide them. Any padding that widens the
+   clip for descenders widens it for the tops of line three as well; 4px was
+   enough to show them. Moving the edge itself grows the box by the font's
+   descent instead, which reaches the descenders and stops short of the next
+   line's box. The over edge stays `cap`, so the 8px gap up to the title is
+   untouched. */
 .exercise-row__subtitle {
   margin: 0;
   padding-top: 4px;
+  text-box: trim-both cap text;
   font-weight: 400;
   overflow: hidden;
   overflow-wrap: anywhere;
