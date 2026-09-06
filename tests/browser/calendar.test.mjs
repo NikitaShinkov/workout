@@ -113,22 +113,31 @@ check('1: each uses its own exported asset',
 check('1: each keeps its exported size',
   icons[0].size === '12x12' && icons[1].size === '15x12',
   icons.map((i) => i.size).join(' | '));
-check('1: an inactive icon is white', icons[0].color === 'rgb(255, 255, 255)', icons[0].color);
-check('1: the unbuilt page reads as unavailable',
-  icons[1].color === 'rgb(91, 91, 98)', icons[1].color);
+check('1: an inactive icon is white', icons.every((i) => i.color === 'rgb(255, 255, 255)'),
+  icons.map((i) => i.color).join(' | '));
 
 await shot('pages-header', '.header');
 
-// The third page is not built: clicking it must go nowhere.
+// Both buttons go somewhere now - the workout page is built.
 await page.evaluate(() => {
   [...document.querySelectorAll('.page-button')]
     .find((b) => b.dataset.page === 'workout').click();
 });
 await new Promise((r) => setTimeout(r, 250));
-check('1: THE WORKOUT BUTTON DOES NOT NAVIGATE', (await activePage()) === null,
+check('1: THE WORKOUT BUTTON NAVIGATES', (await activePage()) === 'workout',
   await activePage());
-check('1: and the schedule page is still the one rendered',
-  (await page.$$('.column--exercise')).length === 1);
+check('1: and the schedule page is gone',
+  (await page.$$('.column--exercise')).length === 0);
+check('1: the workout page is the one rendered',
+  (await page.$$('.workout')).length === 1);
+
+await page.evaluate(() => {
+  document.querySelectorAll('.header .category-list .menu-button')[0].click();
+});
+await new Promise((r) => setTimeout(r, 350));
+check('1: and a category takes us back to the schedule',
+  (await page.$$('.column--exercise')).length === 1 && (await activePage()) === null,
+  await activePage());
 
 // ---------- 2. switching to the calendar ----------
 

@@ -25,9 +25,10 @@ js/model.js           domain constants and factories - no DOM, no storage
 js/schedule.js        dates: parsing, formatting, buildSchedule, buildCalendar
 js/schedule-page.js   page 1 - categories, Exercise_list, Complex_list, drag
 js/calendar-page.js   page 2 - every category's schedule, by day. Read-only
-js/page-selector.js   the header's page switcher, shared by both pages
+js/workout-page.js    page 3 - today / tomorrow / the day after, for a phone
+js/page-selector.js   the header's page switcher, shared by all three pages
 js/category-button.js the insides of a category button - ditto, see gotcha 16
-js/exercise-row.js    Exercise_block itself, shared by both pages
+js/exercise-row.js    Exercise_block itself, shared by the first two pages
 js/toolbar-inputs.js  the masked date field and the guarded interval field
 js/exercise-modal.js  Add/edit popup
 js/animation.js       the hover image sequence
@@ -81,13 +82,21 @@ Page_selector, the new header and the whole calendar page were built from the
 written brief alone; `get_design_context` and `get_screenshot` both refuse. The
 icons were exported by hand into `assets/icons/`, which is the way round this.
 
+**The other way round it is `design/raw/`** — structural JSON exported by the
+Figma Raw plugin, one file per frame. It carries the auto-layout numbers
+(padding, itemSpacing, sizing modes), the fills as hex, and the text content,
+which is enough to build from; what it does NOT carry is vectors, so an `Icon`
+child arrives as a bare `type: "VECTOR"`. The workout page came from
+`Date_selector.json`, `Complex_list.json` and `Preview_bar.json` that way. Read
+them with a small `node -e` walker rather than dumping the JSON — the tree is
+what matters and the raw file is mostly noise.
+
 **The Page_selector icons export as a solid white fill**, so on the active
 button's white ground they would vanish. They are painted as a **CSS mask over
-`currentColor`** rather than as an `<img>` — one file then covers all three
-states (white, black when active, `--not-selected` when disabled) with the
-exported geometry untouched. Each keeps its own exported size: calendar 12×12,
-workout 15×12. The buttons carry no text, so they are addressed by `data-page`
-and named by `aria-label`.
+`currentColor`** rather than as an `<img>` — one file then covers both states
+(white, black when active) with the exported geometry untouched. Each keeps its
+own exported size: calendar 12×12, workout 15×12. The buttons carry no text, so
+they are addressed by `data-page` and named by `aria-label`.
 
 `assets/icons/Page_selector_schedule.svg` (12×10) is committed but **unused** —
 the selector lost its schedule button. `assets/favicon.svg` is likewise unused:
@@ -197,6 +206,20 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     pressed"; call `page.mouse.up()` after every drop. And `page.mouse.drag()`
     hangs forever with no error if the start point is not over a draggable
     element — a scrolled-out-of-view handle, for instance.
+18. **An `<img>` is natively draggable, and starting that drag fires
+    `pointercancel`.** So a swipe that begins on an image never gets its
+    `pointerup`: the workout page's swipe did nothing at all, and the only clue
+    was a `pointercancel` at `clientX: 0`. `js/animation.js` sets
+    `img.draggable = false` on the frame it creates — nothing ever drags the
+    frame itself, and on an exercise row it was hijacking the row's own drag
+    too. `user-select: none` on the container handles the other cancel source,
+    a text-selection gesture.
+19. **`flex: 1 1 0` does not make two siblings equal if one has padding.** With
+    `box-sizing: border-box` a flex base size of 0 cannot resolve below the
+    element's own padding, so `padding: 20px` made the workout page's
+    Complex_list exactly 40px taller than the image_block beside it. Put that
+    air on the children (`> :first-child { margin-top }`) and the two halves
+    match. The list still needs the horizontal padding, which costs nothing.
 
 ## Pages
 
@@ -206,11 +229,19 @@ own store subscription, so **every mount returns the function that undoes it** �
 skip that and two pages render into the same container and both react to every
 mutation. `browser/calendar` guards it (`A MUTATION RENDERS ONE PAGE, NOT TWO`).
 
+**The hash names the page**, and nothing else does: `index.html#workout` opens
+the workout page directly, which is how it reaches a phone. `goToPage()` writes
+the hash, `mountApp()` reads it once, and a `hashchange` listener makes the
+back button walk the pages visited. A hash naming no page falls back to the
+schedule. That is the *only* routing — the page is still not persisted, so a
+plain `index.html` always opens on the schedule.
+`browser/workout-layout` section 10 guards all of it.
+
 **Page_selector holds only calendar and workout — the schedule has no button.**
-A category *is* the way to the schedule, on either page: on the calendar the
-header carries the category list as navigation, and picking one opens that
-category's schedule. So on the schedule page nothing in the selector is active,
-and the selector reads as "somewhere else you can go".
+A category *is* the way to the schedule, from any page: the calendar's and the
+workout page's headers carry the category list as navigation, and picking one
+opens that category's schedule. So on the schedule page nothing in the selector
+is active, and the selector reads as "somewhere else you can go".
 
 - **schedule** (`js/schedule-page.js`) — the default, and where the app always
   opens; the page is deliberately not persisted.
@@ -223,13 +254,24 @@ and the selector reads as "somewhere else you can go".
   button, rename or drag. Add_category_button creates one and leaves for the
   schedule, editing its name: `editCategoryOnOpen()` in `schedule-page.js` is
   how that intent survives the page swap.
-- **workout** — not built. The third button is rendered but inert.
+- **workout** (`js/workout-page.js`) — read-only too, and the only page built
+  for a phone. Three blocks: Date_selector (today / tomorrow / the day after,
+  today by default), image_block with its Preview_bar, and Complex_list. The
+  two lower blocks split what is left of the height in half.
+  It shows **every category's** complexes for the chosen day, so it reads
+  `buildCalendar()` the way the calendar does; `buildWorkoutDays()` is exported
+  and is where all the arithmetic lives, which is what `jsdom/workout` tests.
+  Its header is the same `.categories` block in the same place — no
+  view_options, since neither the indicators nor the favourites column has
+  anything to act on here.
 
 `js/exercise-row.js` holds Exercise_block itself. The schedule page and the
 calendar agree on how it *looks* and disagree about what it *does*, so
 everything behavioural arrives through options and nothing in there reads the
 store. The hover-animation registry lives there too, which is why both pages
-call `stopAllRowAnimations()` before a render.
+call `stopAllRowAnimations()` before a render. The workout page uses none of it
+— its Complex_block is its own thing, and it drives `createSequenceAnimation`
+directly.
 
 A category switched out of the schedule contributes nothing to the calendar — it
 has no schedule to place.
@@ -281,15 +323,30 @@ else.
   `fullExerciseIndex` / `fullItemIndex` / `fullComplexIndex` before the store
   sees it. Dates are still worked out over every complex, so filtering can never
   renumber one.
+- **An exercise's duration is `lastDurationSec`**, seeded to
+  `DEFAULT_DURATION_SEC` (120 = 2 min) and meant to be overwritten with what the
+  exercise actually took once it has been performed. The workout page's
+  "N упражнений, M мин" is the sum over the complex, so it improves on its own
+  as feedback capture lands. Nothing writes it yet.
+- **A workout Complex_block's equipment is the union of its exercises'**, walked
+  in `EQUIPMENT` order rather than in mention order so the same complex always
+  reads the same way, and capitalised only as a whole line
+  (`Коврик, короткая лента, рол`).
+- Counting things in Russian needs three forms, so `plural()` in
+  `workout-page.js` is exported and tested — including the 11–14 exception,
+  which a naive `n % 10` gets wrong (`11 упражнений`, not `11 упражнение`).
+- The workout page's **Начать appears only on today's blocks**. It is rendered
+  `disabled` because the page it would open does not exist.
 
 ## Not built yet, by design
 
-Cyclic schedule rotation, feedback capture, the workout page, and syncing data
-to the repo via the GitHub API (`js/db.js` is the seam for that).
+Cyclic schedule rotation, feedback capture, the exercise-execution page behind
+the workout page's Начать button, and syncing data to the repo via the GitHub
+API (`js/db.js` is the seam for that).
 
 A category switched out of the schedule (`scheduleEnabled`) fades its menu
-button, but the rule it exists for — its exercises not appearing on the workout
-page — has nothing to act on until that page is built.
+button, and that is now visible in three places: it drops out of the calendar
+and out of the workout page as well, because `buildCalendar()` skips it.
 
 ## Unverified against the design
 
@@ -299,16 +356,28 @@ whenever the plan allows a call again:
 - **`Date_pointer`'s marker shape.** A white 14×18 CSS triangle at the left end
   of a white 2px rule. The geometry came from the node metadata; the shape
   itself was never seen.
-- **The whole Page_selector.** Button padding is `0 8px` (giving 28/31px
-  buttons), and the unbuilt workout page's icon is `--not-selected` grey so it
-  reads as unavailable. Both are choices, not the design's.
+- **The whole Page_selector.** Button padding is `0 8px`, giving 28/31px
+  buttons. A choice, not the design's.
 - **Category_block** on a calendar day — a tab strip reusing `.menu-button`.
+- **image_block.** There is no design file for it, only the brief. It is a plain
+  area with the frame `object-fit: contain`ed into it — no ground, no border, no
+  radius — on the grounds that this is the picture being worked from, so none of
+  the pose may be cropped and nothing should compete with it.
+- **The workout page's vertical rhythm.** "Upper half / lower half" is read as
+  the two blocks splitting whatever the Date_selector leaves, and the 40px the
+  Date_selector carries in Figma is treated as the top inset (so `.page--workout`
+  drops the shell's own 24px gap). The 400px desktop cap is centred, which is a
+  choice — the header above it is left-aligned.
+- **Start_button's icon.** `Complex_list.json` has an `Icon` VECTOR child, but
+  the button is 54px wide and `6 + 42 + 6` is already 54 — there is no room for
+  one, so it is rendered as text alone. Raw JSON carries no vectors, so this
+  cannot be settled without a screenshot.
 
 ## Testing
 
 ```
 npm install          once
-npm test             all 18 suites, ~650 checks, ~85s
+npm test             all 20 suites, ~735 checks, ~90s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -318,7 +387,7 @@ process and prints a summary. **Run it after any change** — it is fast and it
 covers behaviour that is easy to break silently.
 
 - `tests/jsdom/` — logic: store, modal, selection, categories, undo, drag,
-  complexes. `fake-indexeddb` backs persistence, which is how the version-1
+  complexes, the workout page. `fake-indexeddb` backs persistence, which is how the version-1
   migration is tested against a realistic saved record.
   `complexes.test.mjs` installs a **fake layout engine** (`layout()`) that gives
   every complex and row a rect, because every drop decision is geometric and
@@ -329,18 +398,21 @@ covers behaviour that is easy to break silently.
   search). jsdom has no layout engine and no `:hover`, so these are the only
   place geometry can be checked.
   Which browser suite covers what: `calendar` the page swap and the calendar
-  page, `toolbar` the two masked fields plus the category switch and the
-  favourites filter, `complex-drag` / `complex-layout` the schedule page's
+  page, `workout-layout` the workout page, its phone breakpoint, its swipe and
+  the hash routing, `toolbar` the two masked fields plus the category switch and
+  the favourites filter, `complex-drag` / `complex-layout` the schedule page's
   lists, `drag` / `category-layout` / `hover-undo` the category menu,
   `row-layout` / `text` / `page-layout` typography and geometry.
 - `tests/browser/harness.html` seeds the app without the file picker:
   `?seed=plain|exercises|text`, `&extras`, `&popup=N`, `&complexes=2,1,1`
   (complex sizes, cut from the seeded exercises), `&off=1` (switch #1 off),
-  `&multi` (a second category with its own complexes) and `&page=calendar`.
+  `&multi` (a second category with its own complexes), `&start=today` (move
+  every category's start date to today, which is the only way the workout page
+  has anything to show) and `&page=calendar|workout`.
 - Screenshots land in `tests/.out/` (gitignored) — read them when a layout
   assertion looks suspicious.
 
-Five lessons paid for in debugging:
+Seven lessons paid for in debugging:
 
 1. Assert **rendered** geometry, not `scrollHeight` — that is the *unclamped*
    height, so a working clamp still reads as "3 lines".
@@ -357,5 +429,14 @@ Five lessons paid for in debugging:
    would fail on the wrong guess and run it against the wrong version.** The
    descender fix was attempted twice; only reverting each attempt under the new
    assertions showed which one actually held.
+6. **A suite that needs today's schedule has to move the start date.** Every
+   category defaults to `3 сен`, which is in the past for most of the year, so
+   a workout-page suite seeded the ordinary way shows three empty days and every
+   assertion about content silently passes on nothing. `&start=today` exists for
+   that; assert a card count, not just the absence of an error.
+7. **`page.goto()` with only a hash change is a same-document navigation** — the
+   app never restarts, so a test of "what does this URL open on" measures the
+   page that was already there. Add a throwaway query (`?a=1#nonsense`) to force
+   a real load.
 
 Adding `"type": "module"` to package.json is why `dev-server.js` uses `import`.

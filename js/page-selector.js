@@ -3,13 +3,11 @@
 import { el } from './dom.js';
 
 // The schedule page has no button of its own: it is reached by picking a
-// category, on either page. So on the schedule nothing here is active, and the
+// category, from any page. So on the schedule nothing here is active, and the
 // selector reads as "somewhere else you can go".
 export const PAGES = [
   { id: 'calendar', label: 'Календарь' },
-  // Not built. The button is there because the design has it, but it stays
-  // inert: clicking it must not switch anywhere.
-  { id: 'workout', label: 'Тренировка', disabled: true },
+  { id: 'workout', label: 'Тренировка' },
 ];
 
 export function renderPageSelector(current, onSelect) {
@@ -21,10 +19,7 @@ export function renderPageSelector(current, onSelect) {
       return el(
         'button',
         {
-          class:
-            'page-button' +
-            (isCurrent ? ' page-button--active' : '') +
-            (page.disabled ? ' page-button--disabled' : ''),
+          class: 'page-button' + (isCurrent ? ' page-button--active' : ''),
           type: 'button',
           role: 'tab',
           // The label is the icon's accessible name, and data-page is how
@@ -32,12 +27,9 @@ export function renderPageSelector(current, onSelect) {
           dataset: { page: page.id },
           'aria-label': page.label,
           'aria-selected': isCurrent ? 'true' : 'false',
-          // aria-disabled rather than the disabled attribute: the button stays
-          // focusable and readable, it simply goes nowhere.
-          'aria-disabled': page.disabled ? 'true' : null,
-          title: page.disabled ? page.label + ' — страница ещё не готова' : page.label,
+          title: page.label,
           onClick: () => {
-            if (page.disabled || isCurrent) return;
+            if (isCurrent) return;
             onSelect(page.id);
           },
         },

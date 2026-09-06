@@ -122,11 +122,12 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   gap: 8px;
 }
 
-/* Page_selector and Category_list carry the same shell, so the two switchers in
-   the header read as one control language. The buttons inside stay 24px, so the
-   shell is 26px with its border. */
+/* Page_selector, Category_list and the workout page's Date_list carry the same
+   shell, so every switcher in the app reads as one control language. The
+   buttons inside stay 24px, so the shell is 26px with its border. */
 .page-selector,
-.category-list {
+.category-list,
+.date-list {
   display: flex;
   align-items: center;
   border: 1px solid var(--stroke);
@@ -157,13 +158,6 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
 .page-button--active {
   background: #ffffff;
   color: #000000;
-}
-
-/* Not built yet. It stays visible because the design has three, but it reads as
-   unavailable and goes nowhere. */
-.page-button--disabled {
-  color: var(--not-selected);
-  cursor: default;
 }
 
 /* The exported icons are a solid white fill, which would vanish on the active
@@ -1192,4 +1186,196 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
 .complex-list {
   scrollbar-width: thin;
   scrollbar-color: var(--not-selected) transparent;
+}
+
+/* ---------- workout page ---------- */
+
+/* The design's Date_selector carries 40px of its own top padding - that is the
+   gap under the header, so the page's own 24px would double it. */
+.page--workout {
+  gap: 0;
+}
+
+/* A phone page. On a desktop it keeps the phone's measure rather than stretching
+   to the window, so what is on screen here is what will be on screen there. */
+.workout {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.date-selector {
+  display: flex;
+  padding: 40px 20px 20px;
+  flex-shrink: 0;
+}
+
+.date-list {
+  width: 100%;
+  overflow: hidden;
+}
+
+/* Same 24px/6px/white-when-active language as .page-button, but the three share
+   the shell's width equally, as the design's 117px thirds of 353px do. */
+.date-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  white-space: nowrap;
+  cursor: pointer;
+  /* The button's height is fixed and its text is centred by the flex box, so no
+     box edge feeds a gap here - and the cap/alphabetic trim would put the
+     descenders of "Сегодня" against the clip on .date-list. */
+  text-box: normal;
+}
+
+.date-button--active {
+  background: #ffffff;
+  color: #000000;
+}
+
+/* image_block and its Preview_bar: the upper half of the page, between the
+   Date_selector and the Complex_list. */
+.workout-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.workout-preview__image {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  /* A horizontal drag here is the exercise switch, so the browser must not
+     claim it as a pan; vertical scrolling is left alone. */
+  touch-action: pan-y;
+  user-select: none;
+}
+
+/* contain, not the cover the popup's thumbnails use: this is the picture being
+   worked from, so none of the pose may be cropped away. */
+.workout-preview__image .seq-anim__img {
+  object-fit: contain;
+}
+
+.workout-preview__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--not-selected);
+}
+
+/* Preview_bar: one segment per exercise in the complex, the current one white. */
+.preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 20px;
+  flex-shrink: 0;
+}
+
+.preview-bar__segment {
+  flex: 1 1 0;
+  height: 4px;
+  background: var(--hover-bg);
+}
+
+.preview-bar__segment--active {
+  background: #ffffff;
+}
+
+/* The lower half. It inherits .complex-list's flex-basis, overflow and
+   scrollbar, which is the 8px `scroll` element the design draws beside it.
+   The design's 20px of air above and below the blocks is a MARGIN on the first
+   and last of them rather than the list's own padding: with box-sizing on
+   border-box a flex-basis of 0 cannot resolve below the padding, so 20px of
+   padding here made this half 40px taller than image_block above it. */
+.complex-list--workout {
+  padding: 0 20px;
+}
+
+.complex-list--workout > :first-child { margin-top: 20px; }
+.complex-list--workout > :last-child { margin-bottom: 20px; }
+
+.workout-complex {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 20px;
+  border-radius: 14px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.workout-complex--active {
+  background: var(--hover-bg);
+}
+
+.workout-complex__text {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workout-complex__head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workout-complex__name,
+.workout-complex__equipment,
+.workout-complex__meta,
+.workout-complex__empty {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.workout-complex__name {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.workout-complex__empty {
+  color: var(--not-selected);
+}
+
+/* Начать has nowhere to go until the exercise-execution page exists. */
+.main-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* On the phone the workout page is the whole app: the header is the way to the
+   Schedule and the Calendar, and neither is wanted mid-workout. */
+@media (max-width: 600px) {
+  .page--workout {
+    padding-top: 0;
+  }
+
+  .page--workout .header {
+    display: none;
+  }
+
+  .page--workout .workout {
+    max-width: none;
+  }
 }

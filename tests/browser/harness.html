@@ -25,11 +25,15 @@
     //   &off=1           switch complex #1 (0-based) out of the schedule
     //   &multi           seed a second category with its own complexes, so the
     //                    calendar has more than one category on a day
+    //   &start=today     schedule every category from today, so the workout
+    //                    page - which only ever looks at today, tomorrow and
+    //                    the day after - has something to show
     //   &page=calendar   open on that page instead of the schedule
     import {
       initStore, addExercise, setUiFlag, activeCategory,
       createComplexFromExercises, setComplexEnabled, setActiveCategory, getState,
     } from '/js/store.js';
+    import { formatDate, startOfDay } from '/js/schedule.js';
     import { mountApp, goToPage } from '/js/app.js';
     import { openExerciseModal } from '/js/exercise-modal.js';
     import { createExercise } from '/js/model.js';
@@ -121,6 +125,16 @@
         createComplexFromExercises([exercise.id], activeCategory().complexes.length);
       }
       setActiveCategory(home);
+    }
+
+    // Every category's default start date is 3 сен, which is in the past for
+    // most of the year. Moving it to today puts complexes on today, tomorrow
+    // and the day after - the only three days the workout page ever shows.
+    if (params.get('start') === 'today') {
+      const today = formatDate(startOfDay());
+      for (const id of getState().categoryOrder) {
+        getState().categories[id].scheduleStartDate = today;
+      }
     }
 
     if (params.has('extras')) {

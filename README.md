@@ -20,7 +20,7 @@ npm install
 npm test
 ```
 
-13 suites, about 400 checks, ~45 seconds. The logic suites run under jsdom; the
+20 suites, about 730 checks, ~90 seconds. The logic suites run under jsdom; the
 layout ones drive the Chrome or Edge already installed on the machine (set
 `CHROME_PATH` if it is somewhere unusual). `npm test -- jsdom` runs a subset.
 
@@ -56,32 +56,50 @@ Stage 1 — the Schedule page and the "add exercise" popup:
 Keyboard: `Ctrl+D` starts a new exercise, `Del` deletes the selected rows,
 `Enter` saves in the popup and `Ctrl+Enter` adds a line break there.
 
-Not built yet, by design: workout complexes, schedule calculation, the two
-`view_options` filter checkboxes, feedback capture, and the workout page.
+Stage 2 — complexes, a schedule, and two more pages:
+
+- Complexes: drag exercises from the list into the schedule column to build
+  them, reorder inside and between them, and switch one out of the schedule.
+  Dates run from a start date at a fixed interval, one enabled complex per slot.
+- **Calendar** page — every category's schedule laid out by day, read-only.
+- **Workout** page — the complexes scheduled for today, tomorrow and the day
+  after, with the selected complex's exercises animated above the list and a
+  swipe to walk through them. Built for a phone: on a narrow screen it drops the
+  header entirely, and `index.html#workout` opens it directly.
+
+Not built yet, by design: cyclic schedule rotation, feedback capture, the
+exercise-execution page behind the workout page's `Начать` button, and syncing
+data to the repo.
 
 ## Layout
 
 ```
-index.html          Schedule page
+index.html          the app shell
 css/app.css         all styles; Figma design tokens are the CSS variables
 dev-server.js       local static server (development only)
 assets/icons/       icons exported from Figma
 js/
   main.js           entry point
+  app.js            which page is mounted, and swapping them
   model.js          categories, equipment, factories
   store.js          state, mutations, persistence
   db.js             IndexedDB wrapper
+  schedule.js       dates, buildSchedule, buildCalendar
   images.js         file import, downscaling, object URLs
   animation.js      reusable image-sequence animation
   dom.js            small DOM helpers
-  schedule-page.js  page rendering and interaction
+  schedule-page.js  the schedule page
+  calendar-page.js  the calendar page
+  workout-page.js   the workout page
   exercise-modal.js the add / edit exercise popup
 ```
 
-`js/animation.js` is deliberately standalone so the workout page can reuse it.
+`js/animation.js` is standalone, which is how the exercise rows, the popup's
+preview and the workout page all share one image-sequence player.
 
 ## Design source
 
 Figma file `ULWMwUv9ivvkRUaHA1JikX`, frames `Schedule_page` (1:1824),
 `Schedule_page_no exercises` (56:3253) and `Add_exercise_popup` (54:1097,
-56:1316).
+56:1316). The workout page was built from `design/raw/*.json` — `Date_selector`,
+`Complex_list` and `Preview_bar`, exported by the Figma Raw plugin.

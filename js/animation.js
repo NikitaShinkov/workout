@@ -15,6 +15,11 @@ export function createSequenceAnimation(container, options) {
   const img = document.createElement('img');
   img.alt = '';
   img.className = 'seq-anim__img';
+  // An <img> is natively draggable, and starting that drag CANCELS the pointer
+  // that began it - which killed the workout page's swipe outright, and on an
+  // exercise row hijacked the row's own drag. Nothing ever drags the frame
+  // itself, so it opts out.
+  img.draggable = false;
   container.appendChild(img);
 
   let frames = [];
