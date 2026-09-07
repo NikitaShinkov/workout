@@ -14,7 +14,10 @@ export function showLoading(container) {
     // A live region rather than visible text: the design has the logo alone,
     // but something has to say what is happening to a screen reader.
     { class: 'loading', role: 'status', 'aria-live': 'polite' },
-    el('span', { class: 'loading__logo' }),
+    // The file itself, not a mask over it: the logo carries its own four-colour
+    // gradient and that is what should be on screen. A mask only takes the
+    // alpha channel, so it would flatten the whole thing to one colour.
+    el('img', { class: 'loading__logo', src: 'assets/icons/app_logo.svg', alt: '' }),
     el('span', { class: 'visually-hidden', text: 'Загрузка…' })
   );
 

@@ -1423,20 +1423,12 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
    geometry is what is wanted. */
 .loading__logo {
   display: block;
+  /* The design's 236px. Height is left to the file so its own 15:12 gives
+     236x189 - a pixel off the design's 190, and undistorted, which matters more.
+     max-width only bites below ~295px; at the design's own 393px it is 236. */
   width: 236px;
-  /* Only bites on a screen narrower than ~295px; at the design's own 393px the
-     logo stays its full 236px. */
   max-width: 80vw;
-  aspect-ratio: 236 / 190;
-  background-color: var(--not-selected);
-  -webkit-mask-image: url("../assets/icons/app_logo.svg");
-  mask-image: url("../assets/icons/app_logo.svg");
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-  -webkit-mask-size: 100% 100%;
-  mask-size: 100% 100%;
+  height: auto;
   /* 800ms out, 800ms back, for ever. `alternate` is what plays the second half
      in reverse, and it mirrors the easing with it - so both directions are
      ease-in-out, which is what the brief asks for. */

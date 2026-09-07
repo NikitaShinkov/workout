@@ -13,6 +13,48 @@ path (`import('/js/store.js')`) resolves to the domain root and 404s — this is
 also why `tests/browser/harness.html`, with its `<base href="/">`, only works on
 localhost.
 
+## Where things stand
+
+Working and in daily use: the Schedule, Calendar and Workout pages, and the data
+in git. The user adds exercises and builds the schedule on the computer and reads
+it on the phone; both show the same data. Verified end to end against the live
+repo, not just in tests.
+
+**Next, in the order it was agreed:**
+
+1. **Durable staging for structural writes** — the one real data-loss window
+   left. See "The one real weakness left" below; it has a settled design and the
+   user's explicit direction on how it should behave.
+2. **Feedback capture** on the workout page — execution time, the three ratings,
+   and whether the complex was finished. The *storage* is built and tested (the
+   `rate`, `duration` and `complex` ops); only the screen is missing, and there
+   is no Figma for it, so it needs a design decision first.
+3. Cyclic schedule rotation, and the exercise-execution page behind Начать.
+
+## Working on this app for real
+
+The data lives in a **second repo**, `NikitaShinkov/workout-data`
+(`js/config.js`), which already holds the user's real exercises and photos.
+**Reads need no token.** Writes need a fine-grained PAT scoped to that repo alone
+with *Contents: read and write*, supplied once per browser origin in the URL
+fragment:
+
+```
+http://localhost:8080/index.html#schedule&k=github_pat_…      the computer
+https://nikitashinkov.github.io/workout/#workout&k=…          the phone
+```
+
+It is then kept in localStorage and stripped from the address bar. **Never commit
+a token** — GitHub revokes any it finds in a public repo, so the leak costs the
+token too. `.gitignore` has a `*token*` backstop because the user keeps theirs in
+a text file inside the project folder and `git add -A` once staged it.
+
+Without a token everything still loads and renders; only saving is inert, which
+is the right default for a session that is only reading.
+
+**Care when testing by hand:** a write goes to the user's real data. `?offline=1`
+skips the network entirely, and the test harness never touches it at all.
+
 ## File map
 
 ```
@@ -122,7 +164,29 @@ makes the logo squash rather than swing — an orthographic flip, which is the
 "horizontal distortion" the brief asked for — and `alternate` on an 800ms
 iteration is what plays the second half in reverse with the easing mirrored, so
 both directions ease in and out. Measured: scale 1 at 0ms, ~0 (edge on) at
-400ms, −1 at 800ms.
+400ms, −1 at 800ms. `browser/loading` pins all of it, including that the logo is
+really a gradient (it counts distinct opaque pixel colours) and really is an
+`<img>` rather than a mask.
+
+### The one real weakness left
+
+**A structural change lives only in memory until it commits.** The op buffer
+(`log.json`) is in localStorage and survives anything, but a brand new exercise
+and its photos do not: if the write fails — expired token, no signal — and the
+page is reloaded, that work is gone, and nothing on screen says so.
+
+The agreed fix, not yet built: stage pending structural writes durably the
+moment they are made, **before** any network call. Photos are `Blob`s, so that
+means IndexedDB again — but in a completely different role from the one it used
+to have: a write-ahead buffer only, never a source of truth, so it cannot make
+the two devices disagree. On the next launch, anything staged is pushed *before*
+the app loads, then cleared.
+
+The user was explicit about how this should feel: **prevent the loss, recover
+silently, and show no error indicators.** A save that failed and was retried is
+not something to report. While a recovery is in flight, put the loading screen
+up and keep the app locked so nothing can be edited into a race — which is why
+`showLoading()` already hands back its own teardown.
 
 ## Figma
 
@@ -147,11 +211,14 @@ in `.mcp.json`. Load the `figma-design-to-code` guidance before
 | `139:4737` | Calendar_page — **not yet seen** |
 
 The loading screen came from `design/raw/Download_1.json` and `Download_2.json`:
-a 236×190 logo in `--not-selected` on the `--bg` ground, the second frame the
-same logo rotated 180°. **The exported `app_logo.svg` is a four-colour gradient**
-and the loading frame is flat grey, so it is painted as a CSS mask over
-`--not-selected` — the Page_selector trick again, for the same reason: the
-exported fill is wrong for this context and only the geometry is wanted.
+a 236×190 logo on the `--bg` ground, the second frame the same logo rotated 180°.
+**The design shows it flat `--not-selected` grey; the app draws it in colour on
+purpose** — `app_logo.svg` carries a four-colour gradient and the user asked for
+that gradient, so the file is drawn as an `<img>` rather than masked. A mask
+takes only the alpha channel, which would flatten it to one colour, so this is
+the one place the Page_selector trick is deliberately *not* used. Height is left
+to the file (its own 15:12 gives 236×189, a pixel off the design's 190) rather
+than forced, so nothing is distorted.
 
 **The Figma MCP is on the Starter plan and its call limit is exhausted.** The
 Page_selector, the new header and the whole calendar page were built from the
@@ -471,11 +538,17 @@ else.
 
 ## Not built yet, by design
 
-Cyclic schedule rotation, the exercise-execution page behind the workout page's
-Начать button, and **feedback capture** — the ratings, the timing and whether a
-complex was finished have no UI yet. The storage for all three is built and
-tested (the `rate`, `duration` and `complex` ops), so what is missing is only
-the screen that records them.
+**Feedback capture** — the ratings, the timing and whether a complex was
+finished have no UI yet. The storage for all three is built and tested (the
+`rate`, `duration` and `complex` ops), so what is missing is only the screen
+that records them, and there is no Figma for it.
+
+Also not built: cyclic schedule rotation, and the exercise-execution page behind
+the workout page's Начать button (which is why that button is rendered
+`disabled`).
+
+And the durability gap above — that one is a known weakness rather than a
+deliberate omission, and it is the next thing to do.
 
 A category switched out of the schedule (`scheduleEnabled`) fades its menu
 button, and that is now visible in three places: it drops out of the calendar
@@ -513,7 +586,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 21 suites, ~800 checks, ~100s
+npm test             all 22 suites, ~815 checks, ~105s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -538,10 +611,15 @@ covers behaviour that is easy to break silently.
   place geometry can be checked.
   Which browser suite covers what: `calendar` the page swap and the calendar
   page, `workout-layout` the workout page, its phone breakpoint, its swipe and
-  the hash routing, `toolbar` the two masked fields plus the category switch and
-  the favourites filter, `complex-drag` / `complex-layout` the schedule page's
-  lists, `drag` / `category-layout` / `hover-undo` the category menu,
-  `row-layout` / `text` / `page-layout` typography and geometry.
+  the hash routing, `loading` the loading screen and its turn, `toolbar` the two
+  masked fields plus the category switch and the favourites filter,
+  `complex-drag` / `complex-layout` the schedule page's lists, `drag` /
+  `category-layout` / `hover-undo` the category menu, `row-layout` / `text` /
+  `page-layout` typography and geometry.
+  Two of them hold the network open on purpose so a transient state stays put
+  long enough to measure: `loading` delays the API so the screen it covers is
+  still there, and `workout-layout` holds a pointer down to catch the swipe
+  mid-gesture.
 - `tests/browser/harness.html` seeds the app without the file picker:
   `?seed=plain|exercises|text`, `&extras`, `&popup=N`, `&complexes=2,1,1`
   (complex sizes, cut from the seeded exercises), `&off=1` (switch #1 off),
@@ -551,7 +629,7 @@ covers behaviour that is easy to break silently.
 - Screenshots land in `tests/.out/` (gitignored) — read them when a layout
   assertion looks suspicious.
 
-Eight lessons paid for in debugging:
+Nine lessons paid for in debugging:
 
 1. Assert **rendered** geometry, not `scrollHeight` — that is the *unclamped*
    height, so a working clamp still reads as "3 lines".
@@ -582,5 +660,15 @@ Eight lessons paid for in debugging:
    newlines, which reads exactly like an encoding bug in the app — it is not.
    Leave Node's own `btoa` and `TextEncoder` in place in the jsdom suites
    rather than aliasing the jsdom ones.
+
+9. **A timing assertion needs margin, or it asserts something false at the
+   boundary.** `browser/loading` sampled the logo every 100ms across a 800ms
+   half-cycle and checked the turn never reversed - but each round trip costs a
+   few ms, so the last sample landed just past 800ms where `alternate` has
+   legitimately started turning back. It passed alone and failed in a full run.
+   Assert monotonicity only over samples that are safely inside the window, and
+   use the extreme (`Math.min`) rather than a fixed index for the turning point.
+   Repeat a suspected flake in a FULL run - the loading suite passed every time
+   on its own.
 
 Adding `"type": "module"` to package.json is why `dev-server.js` uses `import`.
