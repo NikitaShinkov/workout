@@ -227,8 +227,8 @@ check('6: Начать is the --active blue, 24px tall, at the right edge',
   blocks.every((b) => b.start && b.start.bg === 'rgb(71, 140, 246)' && b.start.height === 24
     && Math.abs(b.start.gap - 20) < 0.5),
   JSON.stringify(blocks.map((b) => b.start)));
-check('6: IT IS DISABLED AND READS AS SUCH',
-  blocks.every((b) => b.start.disabled === true && b.start.opacity === '0.5'),
+check('6: AND IT IS LIVE - the exercise page exists now',
+  blocks.every((b) => b.start.disabled === false && b.start.opacity === '1'),
   blocks.map((b) => b.start.disabled + '/' + b.start.opacity).join(' | '));
 
 await shot('workout-desktop', '.page');

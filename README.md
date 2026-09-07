@@ -20,8 +20,8 @@ npm install
 npm test
 ```
 
-22 suites, about 815 checks, ~105 seconds. The logic suites run under jsdom; the
-layout ones drive the Chrome or Edge already installed on the machine (set
+24 suites, about 1065 checks, ~135 seconds. The logic suites run under jsdom;
+the layout ones drive the Chrome or Edge already installed on the machine (set
 `CHROME_PATH` if it is somewhere unusual). `npm test -- jsdom` runs a subset.
 
 The app itself still ships no dependencies — these are `devDependencies` only,
@@ -86,10 +86,33 @@ Stage 3 — the data lives in git:
 - Images are named by the hash of their own bytes: immutable, cached for ever,
   and identical pictures stored once.
 
-Not built yet, by design: cyclic schedule rotation, the exercise-execution page
-behind the workout page's `Начать` button, and feedback capture — the storage
-for ratings and timings is built and tested, but there is no screen yet that
-records them.
+Stage 4 — performing a workout:
+
+- **Exercise** page — what `Начать` opens. The picture animates through the
+  exercise's images; swipe left and the whole set is laid out at once — one
+  image fills the block, a pair goes side by side or one above the other
+  depending on which leaves them bigger, and three or more form two columns at
+  their own height, 4px apart, centred in the block and scrolling only if they
+  do not fit. Swipe right to go back. Under it, the name with a favourites star and the description, and a
+  toolbar of three indicators — **Техника**, **Амплитуда**, **Сила** — that
+  cycle easy → moderate → hard → not selected on each tap.
+- `Button_next` confirms the exercise and opens the next one. It carries a
+  progress ring with one segment per exercise in the complex — grey behind you,
+  blue ahead, blinking for the one on screen — and the time left over this
+  exercise and the ones after it, built from how long each actually took last
+  time.
+- Confirming an exercise records the three ratings, its duration and its
+  favourite state for today: one record per exercise per date, overwritten if
+  it is performed again the same day, while the ratings keep their history
+  across every date the exercise was performed on.
+- Closing keeps whatever was chosen and forgets the clock. `Начать` on the same
+  complex then opens the first exercise still to do, with its values restored.
+- A complex that has been got through loses its `Начать` and goes back to
+  describing itself whole, at the time it really took — "5 упражнений, 25 мин"
+  becomes "5 упражнений, 17 мин". A part-done one keeps the button and says
+  what is left — "2 из 3 упражнений, 4 мин".
+
+Not built yet, by design: cyclic schedule rotation.
 
 ## Layout
 
@@ -114,15 +137,22 @@ js/
   schedule-page.js  the schedule page
   calendar-page.js  the calendar page
   workout-page.js   the workout page
+  exercise-page.js  the exercise page - the only one that writes results
+  gesture.js        the numbers behind every horizontal swipe
   exercise-modal.js the add / edit exercise popup
 ```
 
 `js/animation.js` is standalone, which is how the exercise rows, the popup's
-preview and the workout page all share one image-sequence player.
+preview and both the workout and exercise pages share one image-sequence player.
+`js/gesture.js` does the same job for the swipes: the two pages do different
+things with a horizontal drag, but they have to feel the same.
 
 ## Design source
 
 Figma file `ULWMwUv9ivvkRUaHA1JikX`, frames `Schedule_page` (1:1824),
 `Schedule_page_no exercises` (56:3253) and `Add_exercise_popup` (54:1097,
 56:1316). The workout page was built from `design/raw/*.json` — `Date_selector`,
-`Complex_list` and `Preview_bar`, exported by the Figma Raw plugin.
+`Complex_list` and `Preview_bar` — and the exercise page from `Top_block`,
+`Description_and_toolbar` and `Toolbar`, all exported by the Figma Raw plugin.
+The sheet of every image has no design file at all; its rules come from the
+written brief.

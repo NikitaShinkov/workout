@@ -28,13 +28,20 @@
     //   &start=today     schedule every category from today, so the workout
     //                    page - which only ever looks at today, tomorrow and
     //                    the day after - has something to show
+    //   &images=N        seed N images per exercise instead of two, which is
+    //                    how the exercise page's sheet of every image gets one,
+    //                    a pair and a grid to lay out
     //   &page=calendar   open on that page instead of the schedule
+    //   &page=exercise   start the active category's first complex and open the
+    //                    exercise page on it. Needs &start=today, since only
+    //                    today's complexes can be started.
     import {
       resetStore, addExercise, setUiFlag, activeCategory,
       createComplexFromExercises, setComplexEnabled, setActiveCategory, getState,
     } from '/js/store.js';
     import { toIsoDate, startOfDay } from '/js/schedule.js';
     import { mountApp, goToPage } from '/js/app.js';
+    import { startComplex, resetExerciseState } from '/js/exercise-page.js';
     import { openExerciseModal } from '/js/exercise-modal.js';
     import { createExercise } from '/js/model.js';
 
@@ -72,16 +79,22 @@
        'ЙЁЩЪ ВЕРХНИЕ ЗАГЛАВНЫЕ БУКВЫ первая строка. Вторая строка тоже есть. Третья строка не должна отображаться совсем никак. Четвёртая тем более.'],
     ];
 
-    // resetStore, not initStore: the suites must never reach the network.
+    // resetStore, not initStore: the suites must never reach the network. And
+    // resetExerciseState, because a session is module state that a reload of
+    // this page does not by itself clear.
     resetStore();
+    resetExerciseState();
 
     if (seed === 'exercises' || seed === 'text') {
       const rows = seed === 'text' ? TEXT_CASES : EXERCISES;
+      const count = Number(params.get('images')) || (seed === 'text' ? 1 : 2);
       for (let i = 0; i < rows.length; i += 1) {
-        const images = seed === 'text'
-          ? [await makeImage(String(i + 1), COLORS[i % COLORS.length])]
-          : [await makeImage(String(i + 1), COLORS[i % COLORS.length]),
-             await makeImage('b', COLORS[(i + 1) % COLORS.length])];
+        const images = [];
+        for (let n = 0; n < count; n += 1) {
+          images.push(await makeImage(
+            n === 0 ? String(i + 1) : String.fromCharCode(97 + n),
+            COLORS[(i + n) % COLORS.length]));
+        }
         addExercise(createExercise({
           name: rows[i][0], description: rows[i][1], images, equipment: ['mat'],
         }));
@@ -144,7 +157,17 @@
     }
 
     mountApp(document.getElementById('app'));
-    if (params.get('page')) goToPage(params.get('page'));
+
+    // The exercise page cannot be reached by naming it: it is half of a session,
+    // so the harness starts a complex the way Начать does and then goes there.
+    if (params.get('page') === 'exercise') {
+      const complex = activeCategory().complexes[0];
+      if (complex && startComplex(getState().ui.activeCategory, complex.id)) {
+        goToPage('exercise');
+      }
+    } else if (params.get('page')) {
+      goToPage(params.get('page'));
+    }
 
     if (params.has('popup')) {
       const count = Number(params.get('popup')) || 1;

@@ -13,6 +13,9 @@
   --avr: #ffd60a;
   --easy: #32d74b;
   --active: #478cf6;
+  /* The ring segment behind Button_next: an exercise still to do is --active,
+     one that has been got through is this. */
+  --progress-off: #3b3b3b;
   --not-selected: #5b5b62;
   --text: #ffffff;
 }
@@ -1382,12 +1385,6 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   color: var(--not-selected);
 }
 
-/* Начать has nowhere to go until the exercise-execution page exists. */
-.main-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 /* On the phone the workout page is the whole app: the header is the way to the
    Schedule and the Calendar, and neither is wanted mid-workout. */
 @media (max-width: 600px) {
@@ -1400,6 +1397,368 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   }
 
   .page--workout .workout {
+    max-width: none;
+  }
+}
+
+/* ---------- exercise page ---------- */
+
+/* The page one exercise of a complex is performed on. No header at all - it is
+   the whole screen while a workout is happening, and the close button is the
+   only way off it - so neither the shell's 24px gap nor its top padding apply. */
+.page--exercise {
+  gap: 0;
+  padding-top: 0;
+}
+
+/* The phone's measure on a desktop, like the workout page, so what is on screen
+   here is what will be on screen there. Positioned, because top_block floats
+   over image_block rather than taking a strip of its own. */
+.exercise-view {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+/* top_block: 20px of padding over a 44px button is the design's 64px. It sits
+   ABOVE the picture and takes none of it, so the strip itself is transparent to
+   the pointer - a swipe that starts up here still reaches image_block - and
+   only the button takes clicks. */
+.exercise-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 20px 20px 0;
+  pointer-events: none;
+}
+
+.exercise-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 6px;
+  /* Round: the design's 57px radius is past half of 44, which is a circle. */
+  border-radius: 50%;
+  border: 1px solid var(--stroke);
+  /* Half-transparent, so the picture reads through it rather than being
+     punched a hole in. */
+  background: rgba(29, 29, 29, 0.5);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.exercise-close__icon {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+/* The sheet's panel centres it, which is what the auto margins on
+   .exercise-sheet--grid need a flex box to do. The animation panel is left
+   alone: the frame inside it is positioned against the panel's own edges. */
+.exercise-image__panel--sheet {
+  display: flex;
+}
+
+/* image_block: everything the other three blocks leave, and a viewport over the
+   track carrying the animation and the sheet of every image. */
+.exercise-image {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  /* A horizontal drag here turns the animation into the sheet, so the browser
+     must not claim it as a pan; vertical scrolling is left alone. */
+  touch-action: pan-y;
+  user-select: none;
+}
+
+/* The two views, the sheet parked one width to the right. Every transform here
+   is written by js/exercise-page.js, so nothing in the stylesheet may set one. */
+.exercise-image__track {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.exercise-image__panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+}
+
+/* contain, not cover: this is the pose being worked from, so none of it may be
+   cropped away. The same reason the workout page's preview contains. */
+.exercise-image .seq-anim__img {
+  object-fit: contain;
+}
+
+.exercise-image__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--not-selected);
+}
+
+/* The swipe still commits - it just arrives without the travel. */
+@media (prefers-reduced-motion: reduce) {
+  .exercise-image__track {
+    transition: none !important;
+  }
+}
+
+/* Every image at once, filling the block. Two columns and equal rows are the
+   general case; one image and a pair are special-cased by
+   chooseSheetLayout(), which picks whichever arrangement leaves them biggest -
+   so a pair of wide photographs stacks and a pair of tall ones sits in a row. */
+.exercise-sheet {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  grid-template-columns: 1fr 1fr;
+  /* 1fr on the implicit rows is what splits the height evenly however many
+     rows the count turns into. */
+  grid-auto-rows: 1fr;
+}
+
+.exercise-sheet--single,
+.exercise-sheet--column {
+  grid-template-columns: 1fr;
+}
+
+/* Three or more. Here the rows are the height of the PICTURES rather than a
+   share of the block: a landscape photograph in a half-width cell is short, and
+   giving it a quarter of the height instead left it contained in the middle of
+   its cell with a band of ground above and below - so the 4px gap in the design
+   read as forty. `auto` rows and `height: auto` on the image together mean the
+   only space between two pictures is the gap.
+   The grid then no longer fills the block, so it is centred in it - by AUTO
+   MARGINS and not by align-content, because auto margins collapse to zero once
+   the content overflows and centring would otherwise push the first row out of
+   reach above the scrollport. */
+.exercise-sheet--grid {
+  height: auto;
+  /* Only once it is taller than the block does it become a scrollport of its
+     own; a sheet that fits shows no scrollbar at all. */
+  max-height: 100%;
+  overflow-y: auto;
+  margin: auto 0;
+  grid-auto-rows: auto;
+  /* The scroll stays in the grid: at either end it does not chain out to the
+     page, and it belongs to this panel alone - the animation beside it is a
+     different element and cannot be moved by it. */
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--not-selected) transparent;
+}
+
+/* Width from the cell, height from the picture. */
+.exercise-sheet--grid .exercise-sheet__image {
+  height: auto;
+}
+
+.exercise-sheet__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* Grid items will not shrink below their intrinsic size without this, and one
+     wide photograph would then push the grid past the block. */
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+}
+
+/* Description_and_toolbar. */
+.exercise-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  /* Its height is its content's, and image_block above takes whatever is left.
+     Nothing caps it and nothing inside it scrolls: the description is meant to
+     be read at a glance mid-exercise, and a scrollbar - or a clipped last line -
+     is worse than a shorter picture. */
+  flex-shrink: 0;
+}
+
+/* No overflow of its own, so the whole description is always on screen. */
+.exercise-description {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exercise-description__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.exercise-description__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  /* Centred against the 22px star by its own line box, so no box edge here
+     feeds a gap and the trim would only get in the way. */
+  line-height: 22px;
+  text-box: normal;
+  overflow-wrap: anywhere;
+}
+
+.exercise-description__text {
+  margin: 0;
+  /* The design's 84px over six lines. */
+  line-height: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* Toolbar: three indicators sharing the width and Button_next at its own size,
+   all sitting on one baseline at the bottom. Not .exercise-toolbar - that name
+   is taken, by the strip of fields over the schedule page's Exercise_list. */
+.exercise-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  /* Never the thing that gives. flex-end aligns the buttons to the BOTTOM of
+     this box, so a toolbar squeezed shorter than its own buttons does not clip
+     them - it lets them overflow upwards over the description, which is what
+     happened while this class still collided with the schedule page's. The
+     description is the only part of the block that may shrink. */
+  flex-shrink: 0;
+}
+
+/* The whole block is the button, not the icon inside it - it is aimed at with a
+   thumb mid-exercise. Fixed height, and a third of what Button_next leaves. */
+.indicator-button {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  height: 69px;
+  padding: 0 0 16px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+/* A fixed 40px box, so the three icons sit on one line however tall each
+   drawing happens to be - technique is 30x40, amplitude 43x35, strength 51x29. */
+.indicator-button__icons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 40px;
+}
+
+/* Drawn as an image rather than as a mask over currentColor, which is what the
+   Page_selector icons do: here each level is a DIFFERENT drawing and the
+   exported file already carries the right colour, so the geometry and the fill
+   are both wanted. */
+.indicator-button__icon {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.indicator-button__name {
+  white-space: nowrap;
+}
+
+/* Button_next: 82 across with a 4px ring, so the ring's outer edge lands on the
+   edge of the box. */
+.next-button {
+  position: relative;
+  width: 82px;
+  height: 82px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.next-button__ring {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+/* One segment per exercise in the complex. Butt caps, or a round cap would eat
+   into the 2px between neighbours from both sides. */
+.next-button__segment {
+  fill: none;
+  stroke-linecap: butt;
+}
+
+/* Still to do. */
+.next-button__segment--todo {
+  stroke: var(--active);
+}
+
+/* Got through. */
+.next-button__segment--done {
+  stroke: var(--progress-off);
+}
+
+/* On screen now. steps(1) is what makes this a switch rather than a fade, and
+   the 1s cycle is two 500ms halves - one per colour. */
+.next-button__segment--current {
+  stroke: var(--active);
+  animation: next-segment-blink 1000ms steps(1) infinite;
+}
+
+@keyframes next-segment-blink {
+  0% { stroke: var(--active); }
+  50% { stroke: var(--progress-off); }
+}
+
+.next-button__face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  /* The button under it takes the clicks; this is only what is drawn on it. */
+  pointer-events: none;
+}
+
+.next-button__arrow {
+  display: block;
+  width: 29px;
+  height: 29px;
+}
+
+/* On the phone the exercise page is the whole app, so it drops the measure the
+   desktop keeps it to. */
+@media (max-width: 600px) {
+  .page--exercise .exercise-view {
     max-width: none;
   }
 }

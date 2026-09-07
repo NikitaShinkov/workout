@@ -20,16 +20,17 @@ in git. The user adds exercises and builds the schedule on the computer and read
 it on the phone; both show the same data. Verified end to end against the live
 repo, not just in tests.
 
+The Exercise page is built too — Начать now opens it, a complex is walked
+through with Button_next, and the three ratings, the time each exercise took and
+which exercises were got through are written to the log. That was the whole of
+"feedback capture", so it is off the list.
+
 **Next, in the order it was agreed:**
 
 1. **Durable staging for structural writes** — the one real data-loss window
    left. See "The one real weakness left" below; it has a settled design and the
    user's explicit direction on how it should behave.
-2. **Feedback capture** on the workout page — execution time, the three ratings,
-   and whether the complex was finished. The *storage* is built and tested (the
-   `rate`, `duration` and `complex` ops); only the screen is missing, and there
-   is no Figma for it, so it needs a design decision first.
-3. Cyclic schedule rotation, and the exercise-execution page behind Начать.
+2. Cyclic schedule rotation.
 
 ## Working on this app for real
 
@@ -71,6 +72,8 @@ js/schedule.js        dates: parsing, formatting, buildSchedule, buildCalendar
 js/schedule-page.js   page 1 - categories, Exercise_list, Complex_list, drag
 js/calendar-page.js   page 2 - every category's schedule, by day. Read-only
 js/workout-page.js    page 3 - today / tomorrow / the day after, for a phone
+js/exercise-page.js   page 4 - one exercise being performed. Writes the results
+js/gesture.js         the numbers behind every horizontal swipe, shared
 js/page-selector.js   the header's page switcher, shared by all three pages
 js/category-button.js the insides of a category button - ditto, see gotcha 16
 js/exercise-row.js    Exercise_block itself, shared by the first two pages
@@ -122,16 +125,35 @@ js/dom.js             el() / svg() / clear() - no framework, just these
 **Two files, because they have different authors.** `state.json` is a whole-file
 snapshot of the structure (reorders and drags do not commute, and there is one
 author). `log.json` is an append-only list of **idempotent ops** — `favorite`,
-`duration`, `rate`, `complex` — because the phone writes those and a snapshot
-would discard whatever the computer wrote meanwhile. `applyOps()` merges the log
-over the structure on load.
+`duration`, `rate`, `done`, `complex` — because the phone writes those and a
+snapshot would discard whatever the computer wrote meanwhile. `applyOps()`
+merges the log over the structure on load.
+
+`done` is what a workout produces most of: one op per complex ITEM per day,
+saying that exercise was got through. Keyed by the item and not the exercise,
+because a complex may schedule the same exercise twice and the two have to be
+walked through separately — the same reason selection and drag address the item
+id. It merges into `state.doneLog[itemId][date]`, which `isItemDone()` in
+`js/store.js` is the only reader of.
+
+**`compact()` drops an op once a later one says something about the same
+thing**, and `SUPERSEDED_BY` is what "the same thing" means for each kind. A
+favourite or a duration has only a current value, so the exercise alone is the
+key; `rate`, `done` and `complex` are keyed by day as well, so every day's own
+value survives and only the several ops one day produces get collapsed — cycling
+an indicator round to the value you meant writes four ops and keeps one. **Those
+keys must stay identical to the ones `applyOps` merges by**, or compacting the
+log would change what loading it produced.
 
 **`state.json` carries neither `ui` nor the log's fields.** `favorite`,
-`lastDurationSec` and `feedback` live in the log — otherwise both files would
-claim them and fight — and `ui` is a per-device view preference, so persisting
-it would make every checkbox click a commit and would sync `activeCategory`
-across devices, which is meaningless. `serializeForRepo()` strips all four;
-`applyOps()` puts the `feedback` shape back.
+`lastDurationSec`, `feedback`, `doneLog` and `complexLog` live in the log —
+otherwise both files would claim them and fight — and `ui` is a per-device view
+preference, so persisting it would make every checkbox click a commit and would
+sync `activeCategory` across devices, which is meaningless.
+`serializeForRepo()` and `serializeText()` build their output from a named list
+of structural fields, so anything else on the state is ignored by construction;
+`applyOps()` puts the `feedback` shape back. **A whole workout therefore
+provokes no `state.json` write at all**, which `jsdom/sync` section 7 pins.
 
 **Saving is triggered by idle, never by the tab closing.** MDN is explicit that
 `pagehide`/`unload` are "not reliably fired ... especially on mobile", and the
@@ -210,6 +232,10 @@ in `.mcp.json`. Load the `figma-design-to-code` guidance before
 | `139:5487` | Page_selector states — **not yet seen** |
 | `139:4737` | Calendar_page — **not yet seen** |
 
+The exercise page has no node ids: it arrived as three `design/raw` exports
+(`Top_block`, `Description_and_toolbar`, `Toolbar`) plus the written brief, and
+the MCP could not be asked for the frames they came from.
+
 The loading screen came from `design/raw/Download_1.json` and `Download_2.json`:
 a 236×190 logo on the `--bg` ground, the second frame the same logo rotated 180°.
 **The design shows it flat `--not-selected` grey; the app draws it in colour on
@@ -230,9 +256,20 @@ Figma Raw plugin, one file per frame. It carries the auto-layout numbers
 (padding, itemSpacing, sizing modes), the fills as hex, and the text content,
 which is enough to build from; what it does NOT carry is vectors, so an `Icon`
 child arrives as a bare `type: "VECTOR"`. The workout page came from
-`Date_selector.json`, `Complex_list.json` and `Preview_bar.json` that way. Read
-them with a small `node -e` walker rather than dumping the JSON — the tree is
-what matters and the raw file is mostly noise.
+`Date_selector.json`, `Complex_list.json` and `Preview_bar.json` that way, and
+the exercise page from `Top_block.json`, `Description_and_toolbar.json` and
+`Toolbar.json`. Read them with a small `node -e` walker rather than dumping the
+JSON — the tree is what matters and the raw file is mostly noise.
+
+**The exercise page's icons were exported by hand**, like the Page_selector's,
+and unlike the Page_selector's they are drawn as plain `<img>`s: each level of
+each axis is a DIFFERENT drawing (technique 30x40 easy, 26x40 moderate, 39x37
+hard) and the exported file already carries the right colour, so both the
+geometry and the fill are wanted. A mask would throw the colour away and there
+is nothing to gain by it. `ratingIcon()` in `js/model.js` builds the path from
+`<axis>_<level>`, which is why `strength__moderate.svg` was renamed to
+`strength_moderate.svg` — the double underscore was an export slip.
+The close button reuses `close.svg` at 18px rather than needing a new asset.
 
 **The Page_selector icons export as a solid white fill**, so on the active
 button's white ground they would vanish. They are painted as a **CSS mask over
@@ -370,7 +407,22 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     air on the children (`> :first-child { margin-top }`) and the two halves
     match. The list still needs the horizontal padding, which costs nothing.
 
-21. **An empty GitHub repo refuses the Git Data API outright.**
+21. **Two pages may not share a class name, and `.exercise-toolbar` was
+    already taken.** The exercise page's Toolbar was given that name and
+    silently inherited `height: 24px` from the strip of fields over the schedule
+    page's Exercise_list. Because the Toolbar aligns its buttons to its own
+    BOTTOM edge, a 24px-tall toolbar did not clip them — it let the 69px
+    indicators and the 82px Button_next overflow *upwards*, straight over the
+    description. It is `.exercise-controls` now, and the toolbar carries
+    `flex-shrink: 0` so that nothing can squeeze it again; the description is
+    the only part of the block allowed to give.
+    **Two lessons.** Grep the stylesheet for a class name before using it — the
+    `.exercise-*` prefix already belongs to the exercise *list*. And a
+    flex-end-aligned container that is shorter than its children overflows
+    rather than clipping, so the symptom appears somewhere other than the bug.
+    Found by looking at a screenshot while every assertion passed, which is
+    lesson 3 below for the third time.
+22. **An empty GitHub repo refuses the Git Data API outright.**
     `/git/ref/heads/main`, `/git/blobs` AND `/git/trees` all answer
     `409 "Git Repository is empty."`, so the first commit cannot be built out of
     blobs and a tree at all. The **Contents API** (`PUT /contents/README.md`) is
@@ -383,10 +435,10 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     test: it converts "untested" into "believed working". When a fake stands in
     for something external, make it refuse what the real one refuses — and probe
     the real one with `curl` to find out what that is.
-22. **Never persist `ui`, and never save on a `ui` change.** `setUiFlag` and
+23. **Never persist `ui`, and never save on a `ui` change.** `setUiFlag` and
     `setActiveCategory` go through the same `update()` as everything else, so a
     naive "save on every mutation" turns ticking a checkbox into a git commit.
-23. **A year-less date is a New Year bug.** `scheduleStartDate` used to be
+24. **A year-less date is a New Year bug.** `scheduleStartDate` used to be
     stored as its display form (`"3 сен"`), and `parseStartDate` resolves that
     in the *current* year — so every schedule in the app jumped twelve months on
     1 January. Stored as ISO now; `"3 сен"` is display only. Verified either
@@ -408,6 +460,16 @@ schedule. That is the *only* routing — the page is still not persisted, so a
 plain `index.html` always opens on the schedule.
 `browser/workout-layout` section 10 guards all of it.
 
+**`#exercise` is the exception, and `NEEDS_SESSION` in `js/app.js` is why.**
+The exercise page is half of a session — which complex, which exercise, and the
+moment the clock started — and none of that is persisted, deliberately: a
+workout resumed tomorrow from a bookmark is not the same workout. So
+`pageFromHash()` refuses to return `exercise` unless a complex is actually being
+performed, and a bookmark of it lands on the schedule instead. Mounting it with
+no session draws nothing and leaves for the workout page, deferred with
+`setTimeout(…, 0)` — navigating from inside a mount would leave the shell
+holding this page's teardown for the page that replaced it.
+
 **Page_selector holds only calendar and workout — the schedule has no button.**
 A category *is* the way to the schedule, from any page: the calendar's and the
 workout page's headers carry the category list as navigation, and picking one
@@ -425,8 +487,8 @@ is active, and the selector reads as "somewhere else you can go".
   button, rename or drag. Add_category_button creates one and leaves for the
   schedule, editing its name: `editCategoryOnOpen()` in `schedule-page.js` is
   how that intent survives the page swap.
-- **workout** (`js/workout-page.js`) — read-only too, and the only page built
-  for a phone. Three blocks: Date_selector (today / tomorrow / the day after,
+- **workout** (`js/workout-page.js`) — read-only apart from Начать, and the
+  only page built for a phone. Three blocks: Date_selector (today / tomorrow / the day after,
   today by default), image_block with its Preview_bar, and Complex_list. The
   two lower blocks split what is left of the height in half.
   It shows **every category's** complexes for the chosen day, so it reads
@@ -441,6 +503,13 @@ is active, and the selector reads as "somewhere else you can go".
   Its header is the same `.categories` block in the same place — no
   view_options, since neither the indicators nor the favourites column has
   anything to act on here.
+- **exercise** (`js/exercise-page.js`) — one exercise of one complex, being
+  performed. The only page that WRITES what a workout produced, and the only
+  one with no header at all: it is the whole screen while a workout is on, and
+  the close button is the way off it. Four blocks, and image_block takes
+  whatever the other three leave — top_block floating over the picture,
+  image_block, Description_block, Toolbar. Reached only through Начать; see
+  `NEEDS_SESSION` above.
 
 `js/exercise-row.js` holds Exercise_block itself. The schedule page and the
 calendar agree on how it *looks* and disagree about what it *does*, so
@@ -501,11 +570,11 @@ else.
   sees it. Dates are still worked out over every complex, so filtering can never
   renumber one.
 - **An exercise's duration is `lastDurationSec`**, seeded to
-  `DEFAULT_DURATION_SEC` (120 = 2 min) and meant to be overwritten with what the
-  exercise actually took once it has been performed. The workout page's
-  "N упражнений, M мин" is the sum over the complex, so it improves on its own
-  as feedback capture lands. The op that records it exists and is tested; the
-  UI that would produce it does not.
+  `DEFAULT_DURATION_SEC` (120 = 2 min) and overwritten with what the exercise
+  actually took every time Button_next confirms one. `exerciseDuration()` in
+  `js/model.js` is the single reader, so every estimate in the app — a
+  Complex_block's "25 мин", Button_next's remaining time — is built from the
+  same number and improves as the exercises get performed.
 - **A workout Complex_block's equipment is the union of its exercises'**, walked
   in `EQUIPMENT` order rather than in mention order so the same complex always
   reads the same way, and capitalised only as a whole line
@@ -513,8 +582,8 @@ else.
 - Counting things in Russian needs three forms, so `plural()` in
   `workout-page.js` is exported and tested — including the 11–14 exception,
   which a naive `n % 10` gets wrong (`11 упражнений`, not `11 упражнение`).
-- The workout page's **Начать appears only on today's blocks**. It is rendered
-  `disabled` because the page it would open does not exist.
+- The workout page's **Начать appears only on today's blocks**, and only while
+  the complex still has something left to do. See "The exercise page" below.
 - **The swipe is a carousel, not a swap.** The track follows the finger 1:1
   while there is a neighbour to bring in; at either end of a complex it follows
   only `EDGE_RESISTANCE` (0.28) of the travel, capped at `EDGE_MAX_PX` (56), so
@@ -536,19 +605,107 @@ else.
   every render — and a swipe ends in one — restarted every animation at frame
   one, so the picture flinched exactly as it arrived.
 
+### The exercise page
+
+- **Начать is on today's complexes, and only while there is something left in
+  one.** A complex that has been got through carries no button at all rather
+  than an inert one.
+- **`metaLine()` has two forms, and which one is used says how far along the
+  complex is.** A complex that is untouched *or* finished is described whole —
+  `5 упражнений, 25 мин` — and the difference between the two is what the time
+  MEANS: before, an estimate built from the last performances; after, what this
+  one actually took, so the same line becomes `5 упражнений, 17 мин`. Hence
+  `totalMinutes` alongside `minutes` on a card. Only part way through does it
+  count what is LEFT: `3 из 5 упражнений, 15 мин`, the minutes being the sum
+  over the exercises still to do. (`0 из 5 упражнений, 0 мин` is what the
+  finished case used to say. It was true and useless.)
+  The noun in the part-done form agrees with the **total**, not with the count,
+  because it belongs to "из 5": `3 из 5 упражнений`, and `1 из 1 упражнения`
+  for the one case that ends in a one.
+- **Начать opens the first exercise still to do**, not the first exercise, so a
+  complex closed half way through carries on where it was left. Finishing the
+  last one leaves for the workout page and drops the highlight, so the first
+  complex with anything left to do takes over.
+- **The indicators cycle easy → moderate → hard → not selected → easy.**
+  `none` is a rating in its own right — "performed, nothing to report" — which
+  is why it sits in the cycle rather than only being the starting point.
+  `RATING_CYCLE` and `nextRatingLevel()` in `js/model.js` own the order.
+- **Easy is DISPLAYED, not recorded.** An exercise opened with nothing recorded
+  for the day shows all three on Easy, because that is the common answer and it
+  puts the value one tap away. Nothing is written until the user taps an
+  indicator or confirms the exercise, so merely opening a page cannot invent a
+  rating. What IS recorded for today is what comes back on screen, which is how
+  a page closed and reopened restores what was chosen.
+- **Every tap writes its own op, immediately.** That is why closing the page has
+  nothing to save: each indicator and the star have already recorded themselves,
+  synchronously into localStorage. Button_next then writes all three whether
+  they were touched or not — what is on screen is what the user saw and let
+  stand — plus the duration and the completion.
+- **The clock is module state and is thrown away on close.** A workout closed
+  and picked up an hour later did not take an hour, so `startedAt` is reset
+  rather than persisted, and Button_next restarts it for each exercise.
+- **Button_next's ring is built, not exported.** The number of segments follows
+  the complex, so each is its own `<circle>` carrying a single dash
+  (`stroke-dasharray="len C"`, so the pattern cannot repeat) positioned by a
+  negative `stroke-dashoffset`, with the whole group turned `rotate(-90)` so the
+  count starts at the top instead of at three o'clock. `butt` caps, or a round
+  one would eat into the 2px between neighbours from both sides. The exported
+  `Progress_ellipse_3_4.svg` / `_4_4.svg` are one drawing of one four-segment
+  case and are **not used**.
+  The segment being performed alternates every 500ms, which is `steps(1)` over
+  a 1s animation — two half-second halves, and a switch rather than a fade.
+- **A swipe on image_block turns the animation into the sheet of every image**,
+  and back the other way. It is a two-panel carousel using the same numbers as
+  the workout page's (`js/gesture.js`), so the two feel the same, and it resists
+  at both ends for the same reason.
+- **Where the images go on the sheet is measured, not ruled.**
+  `chooseSheetLayout()` compares how much of the block a pair covers side by
+  side against one above the other and takes the larger — which reproduces both
+  of the brief's examples (wide images stack, tall ones sit in a row) without a
+  rule about shape, and takes the block's own proportions into account too.
+  One image gets the whole block, and so does a pair; both **stretch**, which is
+  what the brief asks of them.
+  It needs the images' shapes and the size of the block, neither of which is
+  known during a render, so the class is applied **after** the append by
+  `applySheetLayout()` and re-applied on a resize without rebuilding anything.
+  The shapes are measured once per url with an off-document `Image`; the
+  animation has already fetched them, so it costs nothing.
+- **Three or more images do NOT stretch.** Two columns, read
+  `1 2 / 3 4 / 5 6` so an odd last one sits in the first column — but the rows
+  are `auto` and the images are `height: auto`, so a row is the height of the
+  *pictures* rather than a share of the block. Giving each a quarter of the
+  height instead left a landscape photograph `contain`ed in the middle of its
+  cell with a band of ground above and below it, so the design's 4px gap read as
+  forty. With content-height rows the only space between two pictures is the
+  gap.
+  The grid then no longer fills the block, so it is **centred** in it — and by
+  `margin: auto` rather than `align-content: center`, because auto margins
+  collapse to zero once the content overflows, whereas centring would push the
+  first row up out of reach above the scrollport. `max-height: 100%` plus
+  `overflow-y: auto` is what makes it a scrollport only when it needs to be: a
+  sheet that fits shows no scrollbar at all. `overscroll-behavior: contain`
+  keeps the scroll in the grid, and `sheetScroll` carries its position across a
+  render so tapping an indicator does not throw you back to the first picture.
+  The animation beside it is a different element and cannot be moved by any of
+  this.
+
 ## Not built yet, by design
 
-**Feedback capture** — the ratings, the timing and whether a complex was
-finished have no UI yet. The storage for all three is built and tested (the
-`rate`, `duration` and `complex` ops), so what is missing is only the screen
-that records them, and there is no Figma for it.
-
-Also not built: cyclic schedule rotation, and the exercise-execution page behind
-the workout page's Начать button (which is why that button is rendered
-`disabled`).
+**Cyclic schedule rotation** is the only feature left of the original brief.
 
 And the durability gap above — that one is a known weakness rather than a
 deliberate omission, and it is the next thing to do.
+
+Two smaller things the exercise page leaves open, neither of which the brief
+asks for:
+
+- **Nothing can be un-done.** `setItemDone` takes a flag and the `done` op
+  carries `done: false`, both tested, but no screen produces it: an exercise
+  confirmed by mistake stays confirmed until tomorrow. The mechanism is there
+  if it is ever wanted.
+- **The remaining time does not count down.** It is built from the historical
+  durations and is recomputed per exercise, which is what the brief asks for —
+  it is an estimate of what is left, not a running clock.
 
 A category switched out of the schedule (`scheduleEnabled`) fades its menu
 button, and that is now visible in three places: it drops out of the calendar
@@ -581,12 +738,35 @@ whenever the plan allows a call again:
   the button is 54px wide and `6 + 42 + 6` is already 54 — there is no room for
   one, so it is rendered as text alone. Raw JSON carries no vectors, so this
   cannot be settled without a screenshot.
+- **top_block's close symbol.** The design has an 18x18 filled VECTOR; the app
+  draws `close.svg` — a two-line cross with round caps — at 18px, whose 8px
+  viewBox scales the 1px stroke to 2.25px. It reads right on a 44px button but
+  it is not the exported glyph.
+- **Button_next's insides.** The design is a GROUP, so it carries no layout:
+  the 29px arrow over the time with a 4px gap, both centred, is a choice. So is
+  the whole ring being generated rather than exported — the exported
+  `Progress_ellipse` files only cover four segments, and the count has to follow
+  the complex.
+- **The description's 14px line-height.** Taken from the design's 353x84 text
+  box over six lines. It is tight for Cyrillic descenders and was not seen
+  rendered. Nothing caps the block and nothing in it scrolls, so a very long
+  description takes the height it needs and image_block gives it up — that is
+  the user's own instruction, and the design has no case for it.
+- **The sheet of every image.** There is no design file for it at all, only the
+  brief's rules. Which arrangement a pair takes is decided by measuring covered
+  area (`chooseSheetLayout()`), which reproduces both of the brief's examples —
+  but the brief describes the outcome, not the method, so a case it disagrees
+  with is possible. The 4px gaps and the two columns are the brief's own.
+- **`--progress-off: #3b3b3b`.** The brief's own hex, one shade off the
+  `--hover-bg-block` `#3a3a3a` already in the stylesheet. Kept as its own token
+  rather than folded into that one, because the brief is explicit — but if they
+  are meant to be the same colour, this is the place it would show.
 
 ## Testing
 
 ```
 npm install          once
-npm test             all 22 suites, ~815 checks, ~105s
+npm test             all 24 suites, ~1065 checks, ~135s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -596,7 +776,7 @@ process and prints a summary. **Run it after any change** — it is fast and it
 covers behaviour that is easy to break silently.
 
 - `tests/jsdom/` — logic: store, modal, selection, categories, undo, drag,
-  complexes, the workout page, and the data-repo sync. **Nothing here touches
+  complexes, the workout page, the exercise page, and the data-repo sync. **Nothing here touches
   the network**: the suites call `resetStore(seed)` rather than `initStore()`,
   and `sync.test.mjs` replaces `fetch` with a fake GitHub that records what was
   committed. `migrate()` is exported and tested as the pure function it is,
@@ -611,7 +791,10 @@ covers behaviour that is easy to break silently.
   place geometry can be checked.
   Which browser suite covers what: `calendar` the page swap and the calendar
   page, `workout-layout` the workout page, its phone breakpoint, its swipe and
-  the hash routing, `loading` the loading screen and its turn, `toolbar` the two
+  the hash routing, `exercise-layout` the exercise page — top_block floating
+  over the picture, the description sizing itself to its text, the Toolbar,
+  Button_next and its ring, the swipe onto the sheet and how the sheet divides
+  the block — `loading` the loading screen and its turn, `toolbar` the two
   masked fields plus the category switch and the favourites filter,
   `complex-drag` / `complex-layout` the schedule page's lists, `drag` /
   `category-layout` / `hover-undo` the category menu, `row-layout` / `text` /
@@ -625,11 +808,17 @@ covers behaviour that is easy to break silently.
   (complex sizes, cut from the seeded exercises), `&off=1` (switch #1 off),
   `&multi` (a second category with its own complexes), `&start=today` (move
   every category's start date to today, which is the only way the workout page
-  has anything to show) and `&page=calendar|workout`.
+  has anything to show), `&images=N` (N images per exercise instead of two, so
+  the exercise page's sheet has a single, a pair and a grid to lay out) and
+  `&page=calendar|workout|exercise`. `&page=exercise` starts the active
+  category's first complex the way Начать does and then goes there, because the
+  page cannot be reached by naming it; it needs `&start=today` with it.
+  It also calls `resetExerciseState()`, because a session is module state that
+  reloading the harness does not by itself clear.
 - Screenshots land in `tests/.out/` (gitignored) — read them when a layout
   assertion looks suspicious.
 
-Nine lessons paid for in debugging:
+Ten lessons paid for in debugging:
 
 1. Assert **rendered** geometry, not `scrollHeight` — that is the *unclamped*
    height, so a working clamp still reads as "3 lines".
@@ -661,7 +850,16 @@ Nine lessons paid for in debugging:
    Leave Node's own `btoa` and `TextEncoder` in place in the jsdom suites
    rather than aliasing the jsdom ones.
 
-9. **A timing assertion needs margin, or it asserts something false at the
+9. **An assertion that reads through a nested object CRASHES the suite instead
+   of failing it.** `getState().complexLog[complexId][DATE] === true` threw when
+   the complex was never finished, so the run died at that line and printed
+   none of the results collected before it - the one failure hid the twelve
+   others that would have said what was actually wrong. Reach through with
+   `(x[a] || {})[b]`, and give every `querySelector` chain in a detail argument
+   a null-safe helper. The suite has to survive its own failures to be worth
+   reading.
+
+10. **A timing assertion needs margin, or it asserts something false at the
    boundary.** `browser/loading` sampled the logo every 100ms across a 800ms
    half-cycle and checked the turn never reversed - but each round trip costs a
    few ms, so the last sample landed just past 800ms where `alternate` has

@@ -187,8 +187,8 @@ check('THE FIRST COMPLEX IS ACTIVE BY DEFAULT, as the design draws it',
 check('every block scheduled for today carries Начать',
   $$('.workout-complex .main-button').length === 2,
   $$('.workout-complex .main-button').length);
-check('IT IS DISABLED - the exercise page is not built',
-  $$('.workout-complex .main-button').every((b) => b.disabled === true));
+check('IT IS LIVE NOW - it opens the exercise page',
+  $$('.workout-complex .main-button').every((b) => b.disabled === false));
 
 // --- image_block and Preview_bar ---
 const segments = () => $$('.preview-bar__segment');

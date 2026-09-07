@@ -11,9 +11,9 @@
 //   image_block     the selected complex's exercises, animated, with Preview_bar
 //   Complex_list    the complexes scheduled for the selected day
 //
-// Read-only, like the calendar: nothing here drags, nothing is edited. The one
-// thing it would do - starting a workout - has no page to open yet, so the
-// Начать button is rendered disabled.
+// Read-only, like the calendar: nothing here drags and nothing is edited. The
+// one thing it does do is start a workout, which hands the complex to the
+// exercise page and leaves.
 
 import { el, clear } from './dom.js';
 import {
@@ -21,6 +21,7 @@ import {
   subscribe,
   setActiveCategory,
   addCategory,
+  isItemDone,
 } from './store.js';
 import { buildCalendar, dayKey, formatDate, addDays, startOfDay } from './schedule.js';
 import { renderPageSelector } from './page-selector.js';
@@ -28,30 +29,21 @@ import { editCategoryOnOpen } from './schedule-page.js';
 import { categoryButtonContents, categoryButtonClass } from './category-button.js';
 import { createSequenceAnimation } from './animation.js';
 import { blobUrl } from './images.js';
-import { EQUIPMENT, DEFAULT_DURATION_SEC } from './model.js';
+import { EQUIPMENT, exerciseDuration } from './model.js';
+import { startComplex, takeFinishedComplex } from './exercise-page.js';
+import {
+  followed,
+  swipeStep,
+  glide,
+  SETTLE_MS,
+  SETTLE_EASING,
+  SPRING_MS,
+  SPRING_EASING,
+} from './gesture.js';
 
 // Only today carries its date; the other two are named, not dated, exactly as
 // the design writes them.
 const DAY_LABELS = ['Сегодня', 'Завтра', 'Послезавтра'];
-
-// How far a pointer has to travel across image_block before it counts as a
-// swipe rather than a tap.
-const SWIPE_MIN_PX = 40;
-
-// At the ends of a complex there is nothing to swipe to, so the block gives a
-// little and no more: it follows this fraction of the finger, up to this many
-// pixels, and springs back when the finger lifts. The end is felt, not hit.
-const EDGE_RESISTANCE = 0.28;
-const EDGE_MAX_PX = 56;
-
-// The settle once the finger lifts. Short, and sharper than the 1:1 tracking it
-// takes over from - it starts fast and decelerates into place, so the gesture
-// reads as completed rather than merely continued. The spring back from an end
-// has nothing to complete, so it is a touch longer and gentler.
-const SETTLE_MS = 200;
-const SETTLE_EASING = 'cubic-bezier(0.2, 0.85, 0.3, 1)';
-const SPRING_MS = 260;
-const SPRING_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)';
 
 // Transient, like the calendar's open tabs: a reload starts on today again.
 let selectedDay = 0;
@@ -79,6 +71,11 @@ let onNavigate = null;
 export function mountWorkoutPage(container, navigate) {
   root = container;
   onNavigate = navigate;
+
+  // Coming back from a complex whose last exercise was just confirmed. Whatever
+  // is highlighted has nothing left to do, so the first complex that does takes
+  // over - which is what render() falls back to with nothing selected.
+  if (takeFinishedComplex()) selectedComplexId = null;
 
   const unsubscribe = subscribe(render);
   render();
@@ -132,30 +129,33 @@ export function buildWorkoutDays(state, now = new Date()) {
 
   return DAY_LABELS.map((label, offset) => {
     const date = addDays(today, offset);
-    const day = byKey.get(dayKey(date));
+    const key = dayKey(date);
+    const day = byKey.get(key);
     return {
       offset,
       date,
       label: offset === 0 ? label + ', ' + formatDate(date) : label,
-      cards: (day ? day.entries : []).map((entry) => describeComplex(state, entry)),
+      cards: (day ? day.entries : []).map((entry) => describeComplex(state, entry, key)),
     };
   });
 }
 
-// An exercise that has never been performed takes the default two minutes; once
-// it has, the time it actually took is what the next estimate is built from.
-function durationOf(exercise) {
-  const seconds = Number(exercise.lastDurationSec);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_DURATION_SEC;
-}
-
-function describeComplex(state, entry) {
+// Each day's completion is read against ITS OWN date rather than against
+// today's, so a card says what is left of that day and not what is left of now.
+function describeComplex(state, entry, date) {
   const category = state.categories[entry.categoryId];
   const byId = new Map((category ? category.exercises : []).map((e) => [e.id, e]));
 
-  const exercises = entry.complex.items
-    .map((item) => byId.get(item.exerciseId))
-    .filter(Boolean);
+  const items = entry.complex.items
+    .map((item) => ({
+      id: item.id,
+      exercise: byId.get(item.exerciseId) || null,
+      done: isItemDone(state, item.id, date),
+    }))
+    .filter((item) => item.exercise);
+
+  const exercises = items.map((item) => item.exercise);
+  const left = items.filter((item) => !item.done);
 
   // The union of what every exercise in the complex asks for, with no
   // duplicates. Walked in EQUIPMENT order rather than in the order the
@@ -164,15 +164,22 @@ function describeComplex(state, entry) {
   const wanted = new Set(exercises.flatMap((exercise) => exercise.equipment || []));
   const equipment = EQUIPMENT.filter((item) => wanted.has(item.id)).map((item) => item.name);
 
-  const seconds = exercises.reduce((total, exercise) => total + durationOf(exercise), 0);
+  const seconds = left.reduce((total, item) => total + exerciseDuration(item.exercise), 0);
+  const totalSeconds = items.reduce((total, item) => total + exerciseDuration(item.exercise), 0);
 
   return {
     id: entry.complex.id,
     categoryId: entry.categoryId,
     name: entry.name,
     exercises,
+    items,
     equipment,
+    total: items.length,
+    remaining: left.length,
+    // What is still to spend, and what the whole complex comes to. With nothing
+    // done the two are equal, which is the ordinary case.
     minutes: Math.round(seconds / 60),
+    totalMinutes: Math.round(totalSeconds / 60),
   };
 }
 
@@ -196,8 +203,24 @@ function equipmentLine(names) {
 }
 
 function metaLine(card) {
-  const count = card.exercises.length;
-  return count + ' ' + plural(count, 'упражнение', 'упражнения', 'упражнений')
+  // Nothing done yet, or all of it done: either way the complex is described
+  // whole - every exercise in it, and what the whole of it comes to. The two
+  // read identically and mean different things, which is the point: before, the
+  // time is an estimate from the last performances; after, it is what this one
+  // actually took, so «5 упражнений, 25 мин» becomes «5 упражнений, 17 мин».
+  // "0 из 5" would have been true and useless.
+  if (card.remaining === card.total || card.remaining === 0) {
+    return card.total + ' '
+      + plural(card.total, 'упражнение', 'упражнения', 'упражнений')
+      + ', ' + card.totalMinutes + ' мин';
+  }
+
+  // Part way through, so what is on screen is what is LEFT of it. The noun
+  // agrees with the TOTAL rather than with the count, because it belongs to
+  // "из 5": «3 из 5 упражнений», and «1 из 1 упражнения» for the one case that
+  // ends in a one.
+  return card.remaining + ' из ' + card.total + ' '
+    + plural(card.total, 'упражнения', 'упражнений', 'упражнений')
     + ', ' + card.minutes + ' мин';
 }
 
@@ -212,7 +235,9 @@ function render() {
   // either way the day's first complex takes over, as the design shows.
   let card = day.cards.find((c) => c.id === selectedComplexId) || null;
   if (!card) {
-    card = day.cards[0] || null;
+    // Nothing chosen, or what was chosen has been deleted or just finished: the
+    // first complex with anything left to do, and only then the first at all.
+    card = day.cards.find((c) => c.remaining > 0) || day.cards[0] || null;
     selectedComplexId = card ? card.id : null;
     previewIndex = 0;
   }
@@ -428,7 +453,10 @@ function attachSwipe(viewport, track, count) {
 
   viewport.addEventListener('pointermove', (event) => {
     if (!drag) return;
-    track.style.transform = 'translateX(' + followed(event.clientX - drag.startX) + 'px)';
+    const travelled = event.clientX - drag.startX;
+    const wanted = previewIndex + (travelled < 0 ? 1 : -1);
+    track.style.transform =
+      'translateX(' + followed(travelled, wanted >= 0 && wanted < drag.count) + 'px)';
   });
 
   viewport.addEventListener('pointerup', (event) => {
@@ -442,16 +470,6 @@ function attachSwipe(viewport, track, count) {
   });
 }
 
-// How far the track actually moves for a given travel of the finger: all of it
-// while there is something to bring in, a damped fraction of it when there is
-// not, so the end of a complex resists rather than stops dead.
-function followed(travelled) {
-  const wanted = previewIndex + (travelled < 0 ? 1 : -1);
-  if (wanted >= 0 && wanted < drag.count) return travelled;
-
-  return Math.sign(travelled) * Math.min(Math.abs(travelled) * EDGE_RESISTANCE, EDGE_MAX_PX);
-}
-
 // The finger has lifted. Either the track carries on to the next slide and the
 // index follows it there, or it goes back where it started.
 function release(travelled) {
@@ -462,7 +480,7 @@ function release(travelled) {
   // held on, not from the start.
   resumeAnimations();
 
-  const step = travelled <= -SWIPE_MIN_PX ? 1 : travelled >= SWIPE_MIN_PX ? -1 : 0;
+  const step = swipeStep(travelled);
   const target = previewIndex + step;
   const commits = step !== 0 && target >= 0 && target < count;
 
@@ -494,11 +512,6 @@ function release(travelled) {
     // The render rebuilds the track around the new index, back at zero.
     render();
   }, SETTLE_MS);
-}
-
-function glide(track, x, ms, easing) {
-  track.style.transition = 'transform ' + ms + 'ms ' + easing;
-  track.style.transform = 'translateX(' + x + 'px)';
 }
 
 // Which segment reads as current, without going through a render.
@@ -554,15 +567,24 @@ function renderComplexCard(day, card, isActive) {
       ),
       el('p', { class: 'workout-complex__meta', text: metaLine(card) })
     ),
-    // Only today's complexes can be started, so only they carry the button. The
-    // page it would open is not built, so it is there and disabled.
-    day.offset === 0
+    // Only today's complexes can be started, and only while there is something
+    // left in them: a complex that has been got through carries no button at
+    // all rather than an inert one.
+    day.offset === 0 && card.remaining > 0
       ? el('button', {
           class: 'main-button',
           type: 'button',
           text: 'Начать',
-          disabled: true,
-          title: 'Страница выполнения упражнений ещё не готова',
+          title: 'Начать комплекс',
+          onClick: (event) => {
+            // The card's own handler would select the complex and RE-RENDER,
+            // and by then this page has been torn down - so the click stops
+            // here and sets the selection itself. It is module state, so the
+            // complex is still highlighted on the way back in.
+            event.stopPropagation();
+            selectedComplexId = card.id;
+            if (startComplex(card.categoryId, card.id)) onNavigate('exercise');
+          },
         })
       : null
   );

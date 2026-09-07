@@ -19,10 +19,11 @@
 //   state.json  structure - categories, exercises, complexes, the schedule.
 //               Written from the schedule page. A whole-file snapshot, because
 //               reorders and drags do not commute and there is one author.
-//   log.json    what a workout produced - times, ratings, favourites, whether
-//               a complex was finished. An append-only list of idempotent ops,
-//               because the phone writes these and a snapshot would discard
-//               whatever the computer had written in the meantime.
+//   log.json    what a workout produced - times, ratings, favourites, which
+//               exercises were got through and whether a complex was finished.
+//               An append-only list of idempotent ops, because the phone writes
+//               these and a snapshot would discard whatever the computer had
+//               written in the meantime.
 
 import { STATE_PATH, LOG_PATH, IMAGE_DIR } from './config.js';
 import { readJson, commitFiles, setToken, hasToken } from './github.js';
@@ -187,6 +188,7 @@ export function applyOps(state, log) {
   const seen = new Set();
 
   if (!state.complexLog) state.complexLog = {};
+  if (!state.doneLog) state.doneLog = {};
 
   for (const op of ops) {
     if (!op || !op.id || seen.has(op.id)) continue;
@@ -195,6 +197,16 @@ export function applyOps(state, log) {
     if (op.kind === 'complex') {
       if (!state.complexLog[op.complexId]) state.complexLog[op.complexId] = {};
       state.complexLog[op.complexId][op.date] = Boolean(op.done);
+      continue;
+    }
+
+    // One exercise of one complex, got through on one day. Keyed by the COMPLEX
+    // ITEM rather than the exercise, because a complex may schedule the same
+    // exercise twice and the two have to be walked through separately - the
+    // same reason selection and drag address the item id on the schedule page.
+    if (op.kind === 'done') {
+      if (!state.doneLog[op.itemId]) state.doneLog[op.itemId] = {};
+      state.doneLog[op.itemId][op.date] = Boolean(op.done);
       continue;
     }
 
@@ -212,7 +224,11 @@ export function applyOps(state, log) {
 
 // One rating per exercise, per axis, per day - so replaying an op is a no-op
 // rather than a second entry. That is what makes the whole log idempotent.
-function upsertRating(exercise, op) {
+//
+// Exported because the store has to do exactly this to the live state as the
+// rating is tapped: the op is what persists, but the screen cannot wait for the
+// next launch to show it. One implementation, so the two cannot disagree.
+export function upsertRating(exercise, op) {
   const history = exercise.feedback[op.axis];
   if (!Array.isArray(history)) return;
 
@@ -416,19 +432,33 @@ async function flushOps() {
   throw new Error('The log could not be written after three attempts.');
 }
 
-// A favourite or a duration only has a current value, so older ops for the same
-// exercise say nothing and are dropped. Ratings are keyed by day and kept.
+// An op says nothing once a later one says something about the same thing, and
+// the key below is what "the same thing" means for each kind. A favourite or a
+// duration has only a current value, so the exercise alone is the key. The
+// other three are keyed by DAY as well, so every day's own value is kept and
+// the history across days - which is the whole point of the ratings - survives;
+// what collapses is only the several ops one day produces while the user cycles
+// an indicator round to the value they meant.
+//
+// This is the same key upsertRating() merges by, deliberately: if the two
+// disagreed, compacting the log would change what loading it produced.
+const SUPERSEDED_BY = {
+  favorite: (op) => 'favorite:' + op.exerciseId,
+  duration: (op) => 'duration:' + op.exerciseId,
+  rate: (op) => 'rate:' + op.exerciseId + ':' + op.axis + ':' + op.date,
+  done: (op) => 'done:' + op.itemId + ':' + op.date,
+  complex: (op) => 'complex:' + op.complexId + ':' + op.date,
+};
+
 function compact(ops) {
   const sorted = ops.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
   const supersedes = new Map();
   const keep = [];
 
   for (const op of sorted) {
-    if (op.kind === 'favorite' || op.kind === 'duration') {
-      supersedes.set(op.kind + ':' + op.exerciseId, op);
-    } else {
-      keep.push(op);
-    }
+    const key = SUPERSEDED_BY[op.kind];
+    if (key) supersedes.set(key(op), op);
+    else keep.push(op);
   }
 
   return [...keep, ...supersedes.values()].sort((a, b) => (a.ts || 0) - (b.ts || 0));

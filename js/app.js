@@ -8,12 +8,21 @@
 import { mountSchedulePage } from './schedule-page.js';
 import { mountCalendarPage } from './calendar-page.js';
 import { mountWorkoutPage } from './workout-page.js';
+import { mountExercisePage, hasExerciseSession } from './exercise-page.js';
 
 const PAGES = {
   schedule: mountSchedulePage,
   calendar: mountCalendarPage,
   workout: mountWorkoutPage,
+  exercise: mountExercisePage,
 };
+
+// The exercise page is the one page that cannot be opened by naming it. It is
+// half of a session - which complex, which exercise, and the moment the clock
+// started - and none of that is persisted, deliberately: a workout resumed
+// tomorrow from a bookmark is not the same workout. So the hash may only reach
+// it while a complex is actually being performed.
+const NEEDS_SESSION = { exercise: hasExerciseSession };
 
 // Not persisted: the schedule page is where the app opens, every time.
 const HOME = 'schedule';
@@ -49,7 +58,9 @@ export function currentPage() {
 
 function pageFromHash() {
   const name = String(window.location.hash || '').replace(/^#/, '');
-  return PAGES[name] ? name : null;
+  if (!PAGES[name]) return null;
+  if (NEEDS_SESSION[name] && !NEEDS_SESSION[name]()) return null;
+  return name;
 }
 
 function onHashChange() {

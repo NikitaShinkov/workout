@@ -223,6 +223,39 @@ s = sync.applyOps(bareState(), {
 });
 check('1: an op for a deleted exercise is dropped, not a crash', Boolean(s));
 
+// Which exercises of a complex were got through, and on which day. This is what
+// lets Начать pick up where a complex was left, and what makes a finished
+// complex stop offering the button - so if it did not survive the log, a
+// workout would forget itself the moment the tab was closed.
+s = sync.applyOps(bareState(), {
+  ops: [
+    { id: 'd1', ts: 1, kind: 'done', complexId: 'cx_1', itemId: 'ci_1', date: '2026-09-05', done: true },
+    { id: 'd2', ts: 2, kind: 'done', complexId: 'cx_1', itemId: 'ci_2', date: '2026-09-06', done: true },
+  ],
+});
+check('1: THE LOG SUPPLIES WHICH EXERCISES WERE GOT THROUGH, by day',
+  s.doneLog.ci_1['2026-09-05'] === true && s.doneLog.ci_2['2026-09-06'] === true,
+  JSON.stringify(s.doneLog));
+check('1: keyed by the complex ITEM, so one exercise scheduled twice is two things to do',
+  Object.keys(s.doneLog).join(',') === 'ci_1,ci_2', Object.keys(s.doneLog).join(','));
+
+// The completion is undone on the same day - the exercise was reopened and not
+// confirmed. Last write wins here as everywhere else.
+s = sync.applyOps(bareState(), {
+  ops: [
+    { id: 'd1', ts: 1, kind: 'done', complexId: 'cx_1', itemId: 'ci_1', date: '2026-09-05', done: true },
+    { id: 'd2', ts: 2, kind: 'done', complexId: 'cx_1', itemId: 'ci_1', date: '2026-09-05', done: false },
+  ],
+});
+check('1: A COMPLETION CAN BE TAKEN BACK on the same day',
+  s.doneLog.ci_1['2026-09-05'] === false, JSON.stringify(s.doneLog));
+check('1: and a day it says nothing about stays unfinished',
+  s.doneLog.ci_1['2026-09-06'] === undefined);
+
+s = sync.applyOps(bareState(), { ops: [] });
+check('1: an empty log still leaves the shape the pages read',
+  s.doneLog && Object.keys(s.doneLog).length === 0, JSON.stringify(s.doneLog));
+
 // ---------- 2. serializeForRepo ----------
 
 sync.resetSync();
@@ -341,6 +374,44 @@ check('5: and the earlier op is still there - nothing was overwritten',
   logNow.ops.some((o) => o.kind === 'favorite') && logNow.ops.some((o) => o.kind === 'duration'),
   JSON.stringify(logNow.ops.map((o) => o.kind)));
 
+// ---------- 5b. the log is compacted, but only where history says nothing ----
+
+sync.resetSync();
+github.setToken('test-token');
+repo.files[LOG_PATH] = JSON.stringify({ version: 1, ops: [] });
+
+// A workout taps an indicator several times before settling on a value, and
+// confirms the same exercise twice in a day. Only the last word on each counts.
+for (const level of ['easy', 'medium', 'hard']) {
+  sync.recordOp({ kind: 'rate', exerciseId: 'ex_1', axis: 'technique', date: '2026-09-05', level });
+}
+sync.recordOp({ kind: 'rate', exerciseId: 'ex_1', axis: 'technique', date: '2026-09-06', level: 'easy' });
+sync.recordOp({ kind: 'done', complexId: 'cx_1', itemId: 'ci_1', date: '2026-09-05', done: false });
+sync.recordOp({ kind: 'done', complexId: 'cx_1', itemId: 'ci_1', date: '2026-09-05', done: true });
+sync.recordOp({ kind: 'done', complexId: 'cx_1', itemId: 'ci_1', date: '2026-09-06', done: true });
+sync.recordOp({ kind: 'duration', exerciseId: 'ex_1', sec: 100 });
+sync.recordOp({ kind: 'duration', exerciseId: 'ex_1', sec: 200 });
+await sync.flush();
+
+const compacted = JSON.parse(repo.files[LOG_PATH]).ops;
+const of = (kind) => compacted.filter((o) => o.kind === kind);
+
+check('5b: A COMPLETION COLLAPSES TO ONE OP PER ITEM PER DAY, not one per tap',
+  of('done').length === 2, JSON.stringify(of('done')));
+check('5b: and it is the last word on the day that survives',
+  of('done').find((o) => o.date === '2026-09-05').done === true,
+  JSON.stringify(of('done')));
+check('5b: RATINGS ARE KEPT PER DAY - the history across days is the point',
+  of('rate').length === 2, JSON.stringify(of('rate').map((o) => o.date + ':' + o.level)));
+check('5b: but a day\'s re-rating collapses to its last value too',
+  of('rate').find((o) => o.date === '2026-09-05').level === 'hard',
+  JSON.stringify(of('rate')));
+check('5b: A DURATION HAS NO HISTORY AT ALL, so only the latest is kept',
+  of('duration').length === 1 && of('duration')[0].sec === 200,
+  JSON.stringify(of('duration')));
+check('5b: so the log cannot grow without bound over a long run of workouts',
+  compacted.length === 5, compacted.length + ': ' + compacted.map((o) => o.kind).join(','));
+
 // ---------- 6. no token: the buffer waits ----------
 
 github.setToken(null);
@@ -370,6 +441,19 @@ live.ui = { activeCategory: 'a', showIndicators: true };
 sync.noteState(live);
 await sync.flush();
 check('7: A VIEW-ONLY CHANGE COMMITS NOTHING',
+  repo.commits.length === commitsBefore, repo.commits.length - commitsBefore);
+
+// Nor must anything a WORKOUT produces. All of it lives in log.json, and a
+// state.json write on every rating would be both a wasted commit and a chance
+// for the phone to overwrite something the computer had just written.
+live.categories.a.exercises[0].favorite = true;
+live.categories.a.exercises[0].lastDurationSec = 95;
+live.categories.a.exercises[0].feedback.technique.push({ date: '2026-09-05', level: 'hard' });
+live.doneLog = { ci_1: { '2026-09-05': true } };
+live.complexLog = { cx_1: { '2026-09-05': true } };
+sync.noteState(live);
+await sync.flush();
+check('7: AND NEITHER DOES A WHOLE WORKOUT - the log owns all of that',
   repo.commits.length === commitsBefore, repo.commits.length - commitsBefore);
 
 live.categories.a.exercises.push({

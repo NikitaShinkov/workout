@@ -10,9 +10,9 @@ import {
   createComplexItem,
   uid,
 } from './model.js';
-import { defaultStartDate } from './schedule.js';
+import { defaultStartDate, dayKey } from './schedule.js';
 import { loadState, saveState } from './db.js';
-import { recordOp } from './sync.js';
+import { recordOp, upsertRating } from './sync.js';
 
 const STATE_VERSION = 2;
 
@@ -39,6 +39,11 @@ function createInitialState() {
     // Equipment chosen for the most recently added exercise. The next new
     // exercise starts pre-ticked with this, per the spec.
     lastEquipment: DEFAULT_EQUIPMENT.slice(),
+    // Which complex items were got through, by day: doneLog[itemId][date].
+    // The log owns it, like favourites and durations - it is a workout result,
+    // not structure - so it is never written into state.json.
+    doneLog: {},
+    complexLog: {},
     ui: {
       activeCategory: categoryOrder[0],
       showIndicators: false,
@@ -330,6 +335,104 @@ export function toggleFavorite(id, categoryId) {
   });
 
   if (on !== null) recordOp({ kind: 'favorite', exerciseId: id, on });
+}
+
+// --- what a workout produced ------------------------------------------------
+//
+// These four are the log's fields rather than state.json's, so each does the
+// same two things toggleFavorite does: mutate the live state so the screen
+// answers at once, and record the op that actually persists. The op is written
+// synchronously into localStorage before anything else, so a phone killed from
+// the app manager a moment later still has it.
+//
+// None of them changes structure, so serializeText() sees no difference and
+// none of them provokes a commit to state.json.
+
+// One rating, for one axis, on one day. Tapping the same indicator again on the
+// same day replaces it rather than adding a second entry; a different day
+// appends, which is the history the indicator column draws.
+export function recordRating(exerciseId, axis, level, date = today(), categoryId = null) {
+  let hit = false;
+
+  update((draft) => {
+    const exercise = findExercise(draft, exerciseId, categoryId);
+    if (!exercise) return;
+    upsertRating(exercise, { axis, date, level });
+    hit = true;
+  });
+
+  if (hit) recordOp({ kind: 'rate', exerciseId, axis, date, level });
+  return hit;
+}
+
+// What the exercise actually took, which is what every later estimate is built
+// from. Only the latest value is kept - there is no history of durations.
+export function recordDuration(exerciseId, seconds, categoryId = null) {
+  const sec = Math.max(1, Math.round(Number(seconds)));
+  if (!Number.isFinite(sec)) return false;
+
+  let hit = false;
+  update((draft) => {
+    const exercise = findExercise(draft, exerciseId, categoryId);
+    if (!exercise) return;
+    exercise.lastDurationSec = sec;
+    hit = true;
+  });
+
+  if (hit) recordOp({ kind: 'duration', exerciseId, sec });
+  return hit;
+}
+
+// One exercise of one complex, got through on one day. Keyed by the complex
+// ITEM, so a complex that schedules the same exercise twice has two things to
+// get through rather than one.
+export function setItemDone(complexId, itemId, done = true, date = today()) {
+  update((draft) => {
+    if (!draft.doneLog) draft.doneLog = {};
+    if (!draft.doneLog[itemId]) draft.doneLog[itemId] = {};
+    draft.doneLog[itemId][date] = Boolean(done);
+  });
+
+  recordOp({ kind: 'done', complexId, itemId, date, done: Boolean(done) });
+}
+
+// The whole complex was got through. Derivable from the items, and recorded
+// anyway: it is the one durable statement that survives the complex being
+// re-dragged into different items afterwards.
+export function setComplexDone(complexId, done = true, date = today()) {
+  update((draft) => {
+    if (!draft.complexLog) draft.complexLog = {};
+    if (!draft.complexLog[complexId]) draft.complexLog[complexId] = {};
+    draft.complexLog[complexId][date] = Boolean(done);
+  });
+
+  recordOp({ kind: 'complex', complexId, date, done: Boolean(done) });
+}
+
+// Whether an item was got through on a day. The single reader of doneLog, so
+// nothing else has to know its shape.
+export function isItemDone(state, itemId, date = today()) {
+  const byDate = (state.doneLog || {})[itemId];
+  return Boolean(byDate && byDate[date]);
+}
+
+// Today, in the log's own date form. Local parts, not toISOString - a UTC date
+// moves the day for anyone east or west of Greenwich.
+export function today(now = new Date()) {
+  return dayKey(now);
+}
+
+function findExercise(draft, exerciseId, categoryId) {
+  // A named category for the calendar and the workout pages, which show
+  // exercises from every category at once; the active one everywhere else.
+  const ids = categoryId ? [categoryId] : [draft.ui.activeCategory, ...draft.categoryOrder];
+
+  for (const id of ids) {
+    const category = draft.categories[id];
+    const exercise = category && (category.exercises || []).find((e) => e.id === exerciseId);
+    if (exercise) return exercise;
+  }
+  return null;
 }
 
 // --- complex operations ----------------------------------------------------
