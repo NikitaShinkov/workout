@@ -20,7 +20,7 @@ npm install
 npm test
 ```
 
-20 suites, about 750 checks, ~95 seconds. The logic suites run under jsdom; the
+21 suites, about 790 checks, ~95 seconds. The logic suites run under jsdom; the
 layout ones drive the Chrome or Edge already installed on the machine (set
 `CHROME_PATH` if it is somewhere unusual). `npm test -- jsdom` runs a subset.
 
@@ -51,7 +51,8 @@ Stage 1 — the Schedule page and the "add exercise" popup:
 - The indicator and favourites buttons in `view_options` show or hide the
   feedback indicators and the star on each row. The star toggles the exercise's
   favourite flag.
-- Everything is persisted in the browser (IndexedDB) and survives a reload.
+- Everything is stored in git (see below), so the computer and the phone show
+  the same data.
 
 Keyboard: `Ctrl+D` starts a new exercise, `Del` deletes the selected rows,
 `Enter` saves in the popup and `Ctrl+Enter` adds a line break there.
@@ -69,9 +70,26 @@ Stage 2 — complexes, a schedule, and two more pages:
   back. Built for a phone: on a narrow screen it drops the header entirely, and
   `index.html#workout` opens it directly.
 
-Not built yet, by design: cyclic schedule rotation, feedback capture, the
-exercise-execution page behind the workout page's `Начать` button, and syncing
-data to the repo.
+Stage 3 — the data lives in git:
+
+- A second public repo, `workout-data`, holds `data/state.json`,
+  `data/log.json` and `data/images/<hash>.jpg`. The app reads it on every
+  launch, so both devices see one copy of the data. Nothing authoritative is
+  kept in the browser.
+- Writing needs a fine-grained GitHub token with **Contents: read and write** on
+  that repo alone. It is passed once in the bookmark URL
+  (`…/#workout&k=github_pat_…`), then kept locally and stripped from the address
+  bar. It is never committed — GitHub auto-revokes tokens found in public repos.
+- Changes are buffered and pushed a few seconds after you stop making them, and
+  again when the page is hidden. Anything unsent is pushed on the next launch,
+  so nothing depends on the tab closing cleanly.
+- Images are named by the hash of their own bytes: immutable, cached for ever,
+  and identical pictures stored once.
+
+Not built yet, by design: cyclic schedule rotation, the exercise-execution page
+behind the workout page's `Начать` button, and feedback capture — the storage
+for ratings and timings is built and tested, but there is no screen yet that
+records them.
 
 ## Layout
 
@@ -85,7 +103,10 @@ js/
   app.js            which page is mounted, and swapping them
   model.js          categories, equipment, factories
   store.js          state, mutations, persistence
-  db.js             IndexedDB wrapper
+  db.js             the persistence seam
+  sync.js           the data repo: read, merge, buffer, flush
+  github.js         Git Data API client
+  config.js         which repo the data lives in
   schedule.js       dates, buildSchedule, buildCalendar
   images.js         file import, downscaling, object URLs
   animation.js      reusable image-sequence animation

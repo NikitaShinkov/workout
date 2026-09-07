@@ -10,7 +10,6 @@ const errs = [];
 page.on('pageerror', e => errs.push(String(e.message)));
 await page.setViewport({ width: 1200, height: 800, deviceScaleFactor: 4 });
 await page.goto(harness('popup=1'), { waitUntil: 'domcontentloaded' });
-await page.evaluate(() => new Promise(r => { const q = indexedDB.deleteDatabase('fitness_app'); q.onsuccess = q.onerror = q.onblocked = () => r(); }));
 await page.goto(harness('popup=1'), { waitUntil: 'networkidle2' });
 await page.waitForSelector('.equipment-options .checkbox-line'); await new Promise(r => setTimeout(r, 800));
 

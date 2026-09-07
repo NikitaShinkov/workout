@@ -11,7 +11,6 @@ page.on('pageerror', e => errs.push(String(e.message)));
 page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
 await page.setViewport({ width: 1600, height: 900 });
 await page.goto(harness('seed=exercises'), { waitUntil: 'domcontentloaded' });
-await page.evaluate(() => new Promise(r => { const q = indexedDB.deleteDatabase('fitness_app'); q.onsuccess = q.onerror = q.onblocked = () => r(); }));
 await page.goto(harness('seed=exercises&extras'), { waitUntil: 'networkidle2' });
 await page.waitForSelector('.exercise-row .indicators');
 await new Promise(r => setTimeout(r, 600));

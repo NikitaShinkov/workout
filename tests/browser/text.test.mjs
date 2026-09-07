@@ -9,7 +9,6 @@ const errs = [];
 page.on('pageerror', e => errs.push(String(e.message)));
 await page.setViewport({ width: 1600, height: 900 });
 await page.goto(harness('seed=text'), { waitUntil: 'domcontentloaded' });
-await page.evaluate(() => new Promise(r => { const q = indexedDB.deleteDatabase('fitness_app'); q.onsuccess = q.onerror = q.onblocked = () => r(); }));
 await page.goto(harness('seed=text'), { waitUntil: 'networkidle2' });
 await page.waitForSelector('.exercise-row'); await new Promise(r => setTimeout(r, 700));
 

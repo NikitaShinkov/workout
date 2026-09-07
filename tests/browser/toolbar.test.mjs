@@ -29,10 +29,6 @@ page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.
 
 await page.setViewport({ width: 1500, height: 800, deviceScaleFactor: 2 });
 await page.goto(harness('seed=exercises'), { waitUntil: 'domcontentloaded' });
-await page.evaluate(() => new Promise((r) => {
-  const q = indexedDB.deleteDatabase('fitness_app');
-  q.onsuccess = q.onerror = q.onblocked = () => r();
-}));
 await page.goto(harness('seed=exercises&complexes=2,1,1'), { waitUntil: 'networkidle2' });
 await page.waitForSelector('.complex');
 await new Promise((r) => setTimeout(r, 700));
@@ -81,7 +77,10 @@ await page.keyboard.press('Enter');
 await new Promise((r) => setTimeout(r, 250));
 check('1: Enter commits and shows the month name again', (await dateValue()) === '21 окт',
   await dateValue());
-check('1: and the store has it', (await stored()).start === '21 окт', (await stored()).start);
+// The field SHOWS the month name but the store holds ISO - a display string
+// carries no year, so storing one moved every schedule on 1 January.
+check('1: AND THE STORE HAS IT AS ISO, not as the displayed string',
+  (await stored()).start.endsWith('-10-21'), (await stored()).start);
 check('1: the schedule follows',
   (await page.$$eval('.complex__date', (n) => n.map((d) => d.textContent))).join(',')
     === '21 окт,22 окт,23 окт',
@@ -116,8 +115,8 @@ await page.keyboard.press('Enter');
 await new Promise((r) => setTimeout(r, 250));
 check('1: AN IMPOSSIBLE DATE REVERTS to the last good one',
   (await dateValue()) === '31 дек', await dateValue());
-check('1: and the store was not touched', (await stored()).start === '31 дек',
-  (await stored()).start);
+check('1: and the store was not touched',
+  (await stored()).start.endsWith('-12-31'), (await stored()).start);
 
 // Escape abandons the edit.
 await page.click('.input--date');

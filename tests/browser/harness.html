@@ -30,10 +30,10 @@
     //                    the day after - has something to show
     //   &page=calendar   open on that page instead of the schedule
     import {
-      initStore, addExercise, setUiFlag, activeCategory,
+      resetStore, addExercise, setUiFlag, activeCategory,
       createComplexFromExercises, setComplexEnabled, setActiveCategory, getState,
     } from '/js/store.js';
-    import { formatDate, startOfDay } from '/js/schedule.js';
+    import { toIsoDate, startOfDay } from '/js/schedule.js';
     import { mountApp, goToPage } from '/js/app.js';
     import { openExerciseModal } from '/js/exercise-modal.js';
     import { createExercise } from '/js/model.js';
@@ -72,7 +72,8 @@
        'ЙЁЩЪ ВЕРХНИЕ ЗАГЛАВНЫЕ БУКВЫ первая строка. Вторая строка тоже есть. Третья строка не должна отображаться совсем никак. Четвёртая тем более.'],
     ];
 
-    await initStore();
+    // resetStore, not initStore: the suites must never reach the network.
+    resetStore();
 
     if (seed === 'exercises' || seed === 'text') {
       const rows = seed === 'text' ? TEXT_CASES : EXERCISES;
@@ -131,7 +132,7 @@
     // most of the year. Moving it to today puts complexes on today, tomorrow
     // and the day after - the only three days the workout page ever shows.
     if (params.get('start') === 'today') {
-      const today = formatDate(startOfDay());
+      const today = toIsoDate(startOfDay());
       for (const id of getState().categoryOrder) {
         getState().categories[id].scheduleStartDate = today;
       }

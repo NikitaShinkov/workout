@@ -22,18 +22,12 @@ function check(name, ok, detail) {
   else { failures += 1; lines.push('  FAIL  ' + name + (detail !== undefined ? '  -> ' + detail : '')); }
 }
 
-async function capture(name, url, width, height, waitFor, wipeDb) {
+async function capture(name, url, width, height, waitFor) {
   const page = await browser.newPage();
 
-  // Every capture shares one browser profile, so the seeded IndexedDB leaks
-  // between them. Wipe it when a capture needs a clean slate.
-  if (wipeDb) {
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-    await page.evaluate(() => new Promise((resolve) => {
-      const request = indexedDB.deleteDatabase('fitness_app');
-      request.onsuccess = request.onerror = request.onblocked = () => resolve();
-    }));
-  }
+  // Nothing persists to the browser any more - harness.html calls resetStore()
+  // and index.html is loaded with ?offline=1 - so every capture already starts
+  // from a known state and there is nothing to wipe between them.
 
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(String(e.message)));
@@ -75,7 +69,7 @@ async function capture(name, url, width, height, waitFor, wipeDb) {
 
 
 // --- the reported bug: list visible after adding ---
-const wide = await capture('list', harness('seed=exercises'), 1600, 900, '.exercise-row', true);
+const wide = await capture('list', harness('seed=exercises'), 1600, 900, '.exercise-row');
 const m = wide.metrics;
 lines.push('\n1600x900 with 4 exercises: ' + JSON.stringify(m, null, 0) + '\n');
 
@@ -94,14 +88,14 @@ check('no horizontal page scroll', m.bodyScrollX === false);
 check('no page errors', wide.pageErrors.length === 0, wide.pageErrors.join(' | '));
 
 // --- indicators + favourites ---
-const extras = await capture('extras', harness('seed=exercises&extras'), 1600, 900, '.indicators', true);
+const extras = await capture('extras', harness('seed=exercises&extras'), 1600, 900, '.indicators');
 check('indicators render for every row', extras.metrics.indicators === 4, extras.metrics.indicators);
 check('stars render for every row', extras.metrics.stars === 4, extras.metrics.stars);
 check('rows stay 66px with extras on', extras.metrics.firstRow.h === 66, extras.metrics.firstRow.h);
 check('no page errors (extras)', extras.pageErrors.length === 0, extras.pageErrors.join(' | '));
 
 // --- 960px responsive ---
-const narrow = await capture('narrow', harness('seed=exercises'), 960, 900, '.exercise-row', true);
+const narrow = await capture('narrow', harness('seed=exercises'), 960, 900, '.exercise-row');
 check('960px keeps two columns side by side',
   narrow.metrics.scheduleColumn.w === 480 && narrow.metrics.exerciseColumn.w === 480,
   narrow.metrics.scheduleColumn.w + '/' + narrow.metrics.exerciseColumn.w);
@@ -109,7 +103,7 @@ check('960px has no horizontal scroll', narrow.metrics.bodyScrollX === false);
 check('960px list still has height', narrow.metrics.list.h > 300, narrow.metrics.list.h);
 
 // --- empty state (real index.html, fresh profile so no stored data) ---
-const empty = await capture('empty', BASE + '/index.html', 1600, 900, '.empty-state .main-button', true);
+const empty = await capture('empty', BASE + '/index.html?offline=1', 1600, 900, '.empty-state .main-button');
 check('empty category shows the add button', empty.metrics.emptyState === true);
 check('empty state has no columns', empty.metrics.main === null);
 check('no page errors (empty)', empty.pageErrors.length === 0, empty.pageErrors.join(' | '));

@@ -26,10 +26,6 @@ page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.
 
 await page.setViewport({ width: 1400, height: 500, deviceScaleFactor: 3 });
 await page.goto(harness('seed=plain'), { waitUntil: 'domcontentloaded' });
-await page.evaluate(() => new Promise((r) => {
-  const q = indexedDB.deleteDatabase('fitness_app');
-  q.onsuccess = q.onerror = q.onblocked = () => r();
-}));
 await page.goto(harness('seed=plain'), { waitUntil: 'networkidle2' });
 await page.waitForSelector('.menu-button');
 await new Promise((r) => setTimeout(r, 700));

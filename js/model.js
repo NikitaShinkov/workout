@@ -1,6 +1,6 @@
 // Fixed domain data and factories. No DOM, no storage.
 
-import { DEFAULT_START_DATE, DEFAULT_INTERVAL_DAYS } from './schedule.js';
+import { defaultStartDate, DEFAULT_INTERVAL_DAYS } from './schedule.js';
 
 // Seed categories. These are only used to build a fresh state - once saved,
 // categories are ordinary data the user can rename, add to and delete.
@@ -94,7 +94,7 @@ export function createCategoryState(name = NEW_CATEGORY_NAME) {
     exercises: [],
     complexes: [],
     scheduleEnabled: true,
-    scheduleStartDate: DEFAULT_START_DATE,
+    scheduleStartDate: defaultStartDate(),
     intervalDays: DEFAULT_INTERVAL_DAYS,
   };
 }

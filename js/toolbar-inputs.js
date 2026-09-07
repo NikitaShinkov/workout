@@ -6,10 +6,11 @@
 
 import { el } from './dom.js';
 import {
-  DEFAULT_START_DATE,
+  defaultStartDate,
   formatDate,
   parseNumericDate,
   parseStartDate,
+  toIsoDate,
   toNumericDate,
 } from './schedule.js';
 
@@ -97,7 +98,7 @@ export function createDateInput(value, onCommit) {
   }
 
   function beginEditing() {
-    const date = parseStartDate(display) || parseStartDate(DEFAULT_START_DATE);
+    const date = parseStartDate(display) || parseStartDate(defaultStartDate());
     mask = toNumericDate(date);
     cursor = 0;
     input.value = mask;
@@ -115,7 +116,9 @@ export function createDateInput(value, onCommit) {
     if (date) display = formatDate(date);
     input.value = display;
 
-    if (date) deferCommit(() => onCommit(display));
+    // The field SHOWS "19 сен" but STORES ISO. A display string carries no
+    // year, so storing one meant the date moved every New Year.
+    if (date) deferCommit(() => onCommit(toIsoDate(date)));
   }
 
   function cancel() {
@@ -199,7 +202,7 @@ export function createDateInput(value, onCommit) {
 // still has to show something a user can read.
 function normalizeDisplay(value) {
   const date = parseStartDate(value);
-  return date ? formatDate(date) : DEFAULT_START_DATE;
+  return date ? formatDate(date) : formatDate(parseStartDate(defaultStartDate()));
 }
 
 // --- interval ---------------------------------------------------------------

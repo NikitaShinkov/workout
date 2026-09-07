@@ -49,3 +49,26 @@ export function blobUrl(blob) {
   }
   return url;
 }
+
+// --- content addressing ------------------------------------------------------
+
+// Images are stored under the hash of their own bytes, which buys three things
+// at once: the name can never go stale on the other device, identical images
+// dedupe themselves, and the file is immutable so it can be cached for ever.
+// Only the two JSON files ever need re-reading.
+//
+// 16 hex characters is 64 bits - collisions are not a consideration at any
+// number of exercises a person will ever have.
+export async function hashImage(blob) {
+  const bytes = await blobBytes(blob);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 16);
+}
+
+export async function blobBytes(blob) {
+  return new Uint8Array(await blob.arrayBuffer());
+}

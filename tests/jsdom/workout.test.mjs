@@ -43,7 +43,7 @@ dom.window.addEventListener('error', (e) => errors.push(String(e.message)));
 console.error = (...args) => { errors.push(args.map(String).join(' ')); };
 
 const {
-  initStore, getState, activeCategory, addExercise, updateExercise,
+  resetStore, getState, activeCategory, addExercise, updateExercise,
   setActiveCategory, setCategoryField, createComplexFromExercises,
   setComplexEnabled, setUiFlag,
 } = await mod('store.js');
@@ -58,7 +58,7 @@ const { formatDate, startOfDay, addDays } = await mod('schedule.js');
 // default start date is 3 сен, which is in the past most of the year - moved to
 // today, the complexes land on the three days this page shows.
 
-await initStore();
+resetStore();
 const blob = new dom.window.Blob(['x'], { type: 'image/jpeg' });
 const [first, second] = getState().categoryOrder;
 

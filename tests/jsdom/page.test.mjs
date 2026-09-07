@@ -40,7 +40,7 @@ dom.window.addEventListener('error', (e) => errors.push(String(e.message)));
 const origError = console.error;
 console.error = (...args) => { errors.push(args.map(String).join(' ')); };
 
-const { initStore, getState, activeCategory, addExercise, deleteExercises,
+const { resetStore, getState, activeCategory, addExercise, deleteExercises,
         toggleFavorite, setActiveCategory, setUiFlag } = await mod('store.js');
 const { mountSchedulePage } = await mod('schedule-page.js');
 const { createExercise, DEFAULT_CATEGORIES: CATEGORIES } = await mod('model.js');
@@ -48,7 +48,7 @@ const { createSequenceAnimation } = await mod('animation.js');
 const { chunk } = await mod('dom.js');
 
 // ---------- boot ----------
-await initStore();
+resetStore();
 mountSchedulePage(document.getElementById('app'));
 
 const $ = (sel) => document.querySelector(sel);

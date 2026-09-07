@@ -3,7 +3,6 @@
 
 import { JSDOM } from 'jsdom';
 import { pathToFileURL } from 'node:url';
-import { indexedDB, IDBKeyRange } from 'fake-indexeddb';
 
 import { PROJECT } from '../helpers/env.mjs';
 const mod = (p) => import(pathToFileURL(PROJECT + '/js/' + p).href);
@@ -22,8 +21,6 @@ global.MouseEvent = dom.window.MouseEvent;
 global.KeyboardEvent = dom.window.KeyboardEvent;
 global.Blob = dom.window.Blob;
 global.URL.createObjectURL = () => 'blob:x';
-global.indexedDB = indexedDB;
-global.IDBKeyRange = IDBKeyRange;
 
 let failures = 0;
 const results = [];
@@ -36,7 +33,11 @@ const errors = [];
 const origError = console.error;
 console.error = (...a) => errors.push(a.map(String).join(' '));
 
-// ---------- seed a version-1 record, as saved by the previous build ----------
+// ---------- a version-1 record, as saved by the previous build ----------
+//
+// migrate() is a pure function, so it is fed the fixture directly rather than
+// round-tripped through a fake database. The upgrade still has to work: this is
+// the shape any data saved by an older build is in.
 const V1 = {
   version: 1,
   categories: {
@@ -51,24 +52,11 @@ const V1 = {
         onlyEnabledComplexes: false, favoritesOnly: false },
 };
 
-await new Promise((resolve, reject) => {
-  const request = indexedDB.open('fitness_app', 1);
-  request.onupgradeneeded = () => request.result.createObjectStore('state');
-  request.onsuccess = () => {
-    const db = request.result;
-    const tx = db.transaction('state', 'readwrite');
-    tx.objectStore('state').put(V1, 'current');
-    tx.oncomplete = () => { db.close(); resolve(); };
-    tx.onerror = () => reject(tx.error);
-  };
-  request.onerror = () => reject(request.error);
-});
-
 const store = await mod('store.js');
 const { mountSchedulePage } = await mod('schedule-page.js');
 const { DEFAULT_CATEGORIES, NEW_CATEGORY_NAME } = await mod('model.js');
 
-await store.initStore();
+store.resetStore(V1);
 
 // ---------- migration ----------
 const s = store.getState();
@@ -224,14 +212,34 @@ key($('.menu-button__input'), 'Escape');
 check('the recovered category keeps the default name',
   store.getState().categories[store.getState().categoryOrder[0]].name === NEW_CATEGORY_NAME);
 
-// ---------- persistence round-trip ----------
-await new Promise(r => setTimeout(r, 300));   // let the debounced save land
-const reloaded = await (await mod('db.js')).loadState();
-check('state persisted with the new shape',
-  reloaded && reloaded.version === 2 && Array.isArray(reloaded.categoryOrder),
-  reloaded && reloaded.version);
-check('persisted category has a name',
-  reloaded && reloaded.categories[reloaded.categoryOrder[0]].name === NEW_CATEGORY_NAME);
+// ---------- the shape that actually goes into the repo ----------
+//
+// There is no local database to read back any more, so what matters is that the
+// state survives the repo's own format - which is what a reload really does.
+const { serializeForRepo } = await mod('sync.js');
+const { out } = await serializeForRepo(store.getState());
+
+check('the repo format keeps the version and the order',
+  out.version === 2 && Array.isArray(out.categoryOrder), out.version);
+check('the repo format carries category names',
+  out.categories[out.categoryOrder[0]].name === NEW_CATEGORY_NAME,
+  out.categories[out.categoryOrder[0]].name);
+check('IT CARRIES NO `ui` - view preferences are per-device, not shared',
+  out.ui === undefined, JSON.stringify(out.ui));
+// favorite / lastDurationSec / feedback are the log's fields. If state.json
+// carried them too, the two files would both claim them and fight.
+const anyExercise = Object.values(out.categories)
+  .flatMap((category) => category.exercises)[0];
+check('and no log-owned fields on an exercise',
+  !anyExercise || (anyExercise.favorite === undefined
+    && anyExercise.lastDurationSec === undefined
+    && anyExercise.feedback === undefined),
+  JSON.stringify(anyExercise));
+// It has to come back through migrate() unchanged, or a reload would lose data.
+const reloaded = store.resetStore(JSON.parse(JSON.stringify(out)));
+check('and it migrates back to the same categories',
+  reloaded.categoryOrder.join() === out.categoryOrder.join(),
+  reloaded.categoryOrder.join());
 
 // ---------- report ----------
 console.error = origError;

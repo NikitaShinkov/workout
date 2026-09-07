@@ -41,7 +41,7 @@ const store = await mod('store.js');
 const { mountSchedulePage } = await mod('schedule-page.js');
 const { createExercise } = await mod('model.js');
 
-await store.initStore();
+store.resetStore();
 mountSchedulePage(document.getElementById('app'));
 
 const $ = (s) => document.querySelector(s);

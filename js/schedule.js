@@ -18,10 +18,19 @@ export const MONTHS_SHORT = [
 const MONTH_INDEX = { май: 4 };
 MONTHS_SHORT.forEach((name, index) => { MONTH_INDEX[name] = index; });
 
-// The schedule is not configurable yet, so every category starts here. 3 сен
-// rather than 19 сен so the Date_pointer lands in the middle of a short list
-// instead of below all of it.
-export const DEFAULT_START_DATE = '3 сен';
+// Every category starts here. 3 сен rather than 19 сен so the Date_pointer
+// lands in the middle of a short list instead of below all of it.
+//
+// A default rather than a constant, because a start date is STORED as ISO and
+// an ISO date needs a year. It used to be stored as "3 сен", which carries no
+// year at all, so parseStartDate resolved it in whatever year it was read in -
+// and every schedule in the app silently jumped twelve months on 1 January.
+const DEFAULT_START_MONTH_DAY = '09-03';
+
+export function defaultStartDate(now = new Date()) {
+  return now.getFullYear() + '-' + DEFAULT_START_MONTH_DAY;
+}
+
 export const DEFAULT_INTERVAL_DAYS = 1;
 
 export function formatDate(date) {
@@ -39,9 +48,14 @@ export function startOfDay(now = new Date()) {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
-// "3 сен" -> Date, in the current year. Returns null for anything unparseable,
-// which the caller turns into the default rather than an error.
+// A stored start date is ISO ("2026-09-03"); the display form ("3 сен") is what
+// the toolbar field shows and what older saves hold. Both parse, so nothing has
+// to know which one it is looking at. Null for anything unparseable, which the
+// caller turns into the default rather than an error.
 export function parseStartDate(text, now = new Date()) {
+  const iso = parseIsoDate(text);
+  if (iso) return iso;
+
   const match = /^\s*(\d{1,2})\s+([а-яё]+)\.?\s*$/i.exec(String(text || ''));
   if (!match) return null;
 
@@ -58,6 +72,22 @@ export function parseStartDate(text, now = new Date()) {
 // is what it becomes while it is being typed into.
 function pad2(number) {
   return String(number).padStart(2, '0');
+}
+
+// The STORED form. Local parts, not toISOString - that shifts across the UTC
+// boundary and would move a date by a day for anyone east or west of Greenwich.
+export function toIsoDate(date) {
+  return date.getFullYear() + '-' + pad2(date.getMonth() + 1) + '-' + pad2(date.getDate());
+}
+
+export function parseIsoDate(text) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(text || ''));
+  if (!match) return null;
+
+  const [, year, month, day] = match.map(Number);
+  const date = new Date(year, month - 1, day);
+  // Rejects 2026-02-31, which Date would roll into March.
+  return date.getMonth() === month - 1 && date.getDate() === day ? date : null;
 }
 
 export function toNumericDate(date) {
@@ -89,7 +119,7 @@ export function parseInterval(value) {
 // renumber the ones around it.
 export function buildSchedule(category, now = new Date()) {
   const start =
-    parseStartDate(category.scheduleStartDate, now) || parseStartDate(DEFAULT_START_DATE, now);
+    parseStartDate(category.scheduleStartDate, now) || parseIsoDate(defaultStartDate(now));
   const interval = parseInterval(category.intervalDays);
 
   const dates = new Map();

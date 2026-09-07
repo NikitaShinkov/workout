@@ -17,10 +17,13 @@ localhost.
 
 ```
 index.html            loads js/main.js as a module
-js/main.js            initStore() then mountApp()
+js/main.js            initToken(), initStore(), then mountApp()
 js/app.js             the shell: which page is mounted, and swapping them
 js/store.js           the whole app state; every mutation goes through update()
-js/db.js              one IndexedDB record holding that state (the sync seam)
+js/db.js              the persistence seam - two functions, nothing else
+js/sync.js            the data repo: read, merge, buffer, flush
+js/github.js          Git Data API client (blobs -> tree -> commit -> ref)
+js/config.js          which repo the data lives in
 js/model.js           domain constants and factories - no DOM, no storage
 js/schedule.js        dates: parsing, formatting, buildSchedule, buildCalendar
 js/schedule-page.js   page 1 - categories, Exercise_list, Complex_list, drag
@@ -38,12 +41,21 @@ js/dom.js             el() / svg() / clear() - no framework, just these
 
 ## Decisions already made (don't relitigate)
 
-- **Public repo**, app and data together, so the phone needs no login.
+- **Two public repos.** `workout` is the code and is what Pages builds;
+  `workout-data` holds `data/state.json`, `data/log.json` and
+  `data/images/<hash>.jpg`. Separate, because a write into the built branch
+  rebuilds the site (~10/hour soft limit, ~40s each), which would force a slow
+  save cadence; and because a token that can write the code repo could rewrite
+  the JavaScript running on the phone. A leak now costs exercise data only.
 - **No build step.** Vanilla ES modules served as written.
 - **Categories are data**, not constants — user can add / rename / delete / reorder.
-- **IndexedDB, not localStorage**, because images are stored as `Blob`s.
-  localStorage is strings only; base64 (+33%) against a ~5MB quota overflows
-  after a handful of exercises.
+- **The repo is the source of truth, not the browser.** Every launch reads it,
+  so the computer and the phone cannot drift apart. localStorage holds only the
+  token, the op buffer, and a last-good cache so the app still opens with no
+  signal - none of it authoritative.
+- **Images are content-addressed** (`data/images/<sha256-16>.jpg`), so they are
+  immutable, cacheable for ever, and deduplicated. Only the two JSON files are
+  ever re-read, and only they need cache-busting.
 - **Cyclic schedule rotation**: enabled complexes take turns, one every
   `interval` days, repeating. (Not implemented yet — see Not built.)
 - **A complex item points at an exercise, it does not copy it.**
@@ -54,6 +66,50 @@ js/dom.js             el() / svg() / clear() - no framework, just these
   exercise stay independent. Deleting an exercise takes its scheduled items with
   it, and `js/store.js` prunes any complex that is left empty; an empty complex
   has no date to show and nothing to perform, so the list never holds one.
+
+## Storing the data in git
+
+`js/db.js` is still the only seam the store knows about — `loadState()` once,
+`saveState(state)` on every mutation — but it now talks to `js/sync.js`.
+
+**Two files, because they have different authors.** `state.json` is a whole-file
+snapshot of the structure (reorders and drags do not commute, and there is one
+author). `log.json` is an append-only list of **idempotent ops** — `favorite`,
+`duration`, `rate`, `complex` — because the phone writes those and a snapshot
+would discard whatever the computer wrote meanwhile. `applyOps()` merges the log
+over the structure on load.
+
+**`state.json` carries neither `ui` nor the log's fields.** `favorite`,
+`lastDurationSec` and `feedback` live in the log — otherwise both files would
+claim them and fight — and `ui` is a per-device view preference, so persisting
+it would make every checkbox click a commit and would sync `activeCategory`
+across devices, which is meaningless. `serializeForRepo()` strips all four;
+`applyOps()` puts the `feedback` shape back.
+
+**Saving is triggered by idle, never by the tab closing.** MDN is explicit that
+`pagehide`/`unload` are "not reliably fired ... especially on mobile", and the
+case it gives — background the app, later close it from the app manager — is
+exactly how a workout ends. `sendBeacon` cannot set an `Authorization` header,
+so it cannot reach the API at all. So: buffer synchronously into localStorage on
+every op, flush after `FLUSH_IDLE_MS` (4s) of quiet, flush again on
+`visibilitychange → hidden` as a bonus, and flush anything left over on the next
+launch. The close event stops mattering.
+
+**A write only happens when the state really changed.** `sync.js` keeps a
+`baseline` — the serialization of the state as loaded — and compares against it.
+That is what stops a view toggle committing, and, more importantly, what stops a
+device writing back the pruning `normalizeComplexes()` does on every load.
+
+**The token** rides in the bookmark's fragment (`#workout&k=…`), which is never
+sent to a server. `initToken()` must run **before `mountApp()`**:
+`pageFromHash()` reads the whole fragment as a page name, so `#workout&k=…`
+matches nothing and `goToPage()` would then overwrite the hash and destroy it.
+It is copied to localStorage and stripped from the address bar; the home-screen
+bookmark still carries it, so it heals itself if storage is ever cleared.
+Reads need no token (60/hour per address); writes do (5000/hour).
+
+`?offline=1` skips the network entirely — that is how the browser suites drive
+the real `index.html` without depending on a repo, a token or a connection.
 
 ## Figma
 
@@ -227,6 +283,28 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     air on the children (`> :first-child { margin-top }`) and the two halves
     match. The list still needs the horizontal padding, which costs nothing.
 
+21. **An empty GitHub repo refuses the Git Data API outright.**
+    `/git/ref/heads/main`, `/git/blobs` AND `/git/trees` all answer
+    `409 "Git Repository is empty."`, so the first commit cannot be built out of
+    blobs and a tree at all. The **Contents API** (`PUT /contents/README.md`) is
+    the only door into a repo with no commits, and it creates the branch as a
+    side effect — so `commitFiles()` bootstraps with a README once, then takes
+    the normal path for ever after.
+    **The lesson is about the fake, not the API.** `jsdom/sync` passed while the
+    real thing failed, because the fake allowed blobs and trees on an empty
+    repo. A fake that is more permissive than the real service is worse than no
+    test: it converts "untested" into "believed working". When a fake stands in
+    for something external, make it refuse what the real one refuses — and probe
+    the real one with `curl` to find out what that is.
+22. **Never persist `ui`, and never save on a `ui` change.** `setUiFlag` and
+    `setActiveCategory` go through the same `update()` as everything else, so a
+    naive "save on every mutation" turns ticking a checkbox into a git commit.
+23. **A year-less date is a New Year bug.** `scheduleStartDate` used to be
+    stored as its display form (`"3 сен"`), and `parseStartDate` resolves that
+    in the *current* year — so every schedule in the app jumped twelve months on
+    1 January. Stored as ISO now; `"3 сен"` is display only. Verified either
+    side of the boundary.
+
 ## Pages
 
 `js/app.js` is the shell: it mounts one page into `#app` and swaps it on
@@ -339,7 +417,8 @@ else.
   `DEFAULT_DURATION_SEC` (120 = 2 min) and meant to be overwritten with what the
   exercise actually took once it has been performed. The workout page's
   "N упражнений, M мин" is the sum over the complex, so it improves on its own
-  as feedback capture lands. Nothing writes it yet.
+  as feedback capture lands. The op that records it exists and is tested; the
+  UI that would produce it does not.
 - **A workout Complex_block's equipment is the union of its exercises'**, walked
   in `EQUIPMENT` order rather than in mention order so the same complex always
   reads the same way, and capitalised only as a whole line
@@ -360,9 +439,11 @@ else.
 
 ## Not built yet, by design
 
-Cyclic schedule rotation, feedback capture, the exercise-execution page behind
-the workout page's Начать button, and syncing data to the repo via the GitHub
-API (`js/db.js` is the seam for that).
+Cyclic schedule rotation, the exercise-execution page behind the workout page's
+Начать button, and **feedback capture** — the ratings, the timing and whether a
+complex was finished have no UI yet. The storage for all three is built and
+tested (the `rate`, `duration` and `complex` ops), so what is missing is only
+the screen that records them.
 
 A category switched out of the schedule (`scheduleEnabled`) fades its menu
 button, and that is now visible in three places: it drops out of the calendar
@@ -400,7 +481,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 20 suites, ~750 checks, ~95s
+npm test             all 21 suites, ~790 checks, ~95s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -410,8 +491,11 @@ process and prints a summary. **Run it after any change** — it is fast and it
 covers behaviour that is easy to break silently.
 
 - `tests/jsdom/` — logic: store, modal, selection, categories, undo, drag,
-  complexes, the workout page. `fake-indexeddb` backs persistence, which is how the version-1
-  migration is tested against a realistic saved record.
+  complexes, the workout page, and the data-repo sync. **Nothing here touches
+  the network**: the suites call `resetStore(seed)` rather than `initStore()`,
+  and `sync.test.mjs` replaces `fetch` with a fake GitHub that records what was
+  committed. `migrate()` is exported and tested as the pure function it is,
+  against the same version-1 fixture as before.
   `complexes.test.mjs` installs a **fake layout engine** (`layout()`) that gives
   every complex and row a rect, because every drop decision is geometric and
   jsdom's rects are all zero. Anything that re-renders — a click, a key, a
@@ -435,7 +519,7 @@ covers behaviour that is easy to break silently.
 - Screenshots land in `tests/.out/` (gitignored) — read them when a layout
   assertion looks suspicious.
 
-Seven lessons paid for in debugging:
+Eight lessons paid for in debugging:
 
 1. Assert **rendered** geometry, not `scrollHeight` — that is the *unclamped*
    height, so a working clamp still reads as "3 lines".
@@ -461,5 +545,10 @@ Seven lessons paid for in debugging:
    app never restarts, so a test of "what does this URL open on" measures the
    page that was already there. Add a throwaway query (`?a=1#nonsense`) to force
    a real load.
+8. **jsdom's `btoa` rejects input a browser encodes fine.** It threw
+   "The string to be encoded contains invalid characters." on plain ASCII with
+   newlines, which reads exactly like an encoding bug in the app — it is not.
+   Leave Node's own `btoa` and `TextEncoder` in place in the jsdom suites
+   rather than aliasing the jsdom ones.
 
 Adding `"type": "module"` to package.json is why `dev-server.js` uses `import`.

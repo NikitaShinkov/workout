@@ -2,7 +2,6 @@
 
 import { JSDOM } from 'jsdom';
 import { pathToFileURL } from 'node:url';
-import { indexedDB, IDBKeyRange } from 'fake-indexeddb';
 
 import { PROJECT } from '../helpers/env.mjs';
 const mod = (p) => import(pathToFileURL(PROJECT + '/js/' + p).href);
@@ -20,8 +19,6 @@ global.MouseEvent = dom.window.MouseEvent;
 global.KeyboardEvent = dom.window.KeyboardEvent;
 global.Blob = dom.window.Blob;
 global.URL.createObjectURL = () => 'blob:x';
-global.indexedDB = indexedDB;
-global.IDBKeyRange = IDBKeyRange;
 
 let failures = 0;
 const results = [];
@@ -37,7 +34,7 @@ const store = await mod('store.js');
 const { mountSchedulePage } = await mod('schedule-page.js');
 const { createExercise } = await mod('model.js');
 
-await store.initStore();
+store.resetStore();
 mountSchedulePage(document.getElementById('app'));
 
 const $ = (q) => document.querySelector(q);
@@ -201,11 +198,12 @@ fire(buttons()[1], 'dragover', dt, 0);
 fire(buttons()[1], 'drop', dt, 0);
 check('3: dropping a category in place is a no-op', order().join() === held.join(), order().join());
 
-// reordering survives a save/load round trip
-await new Promise((r) => setTimeout(r, 300));
-const reloaded = await (await mod('db.js')).loadState();
-check('3: the new order was persisted', reloaded.categoryOrder.join() === held.join(),
-  reloaded.categoryOrder.join());
+// The order has to survive the format that goes into the repo - there is no
+// local database to read back from any more.
+const { serializeForRepo } = await mod('sync.js');
+const { out } = await serializeForRepo(store.getState());
+check('3: the new order is what would be committed',
+  out.categoryOrder.join() === held.join(), out.categoryOrder.join());
 
 // ---------- 4. dragging selects the button and drops the hover extras ----------
 // Put the active button into the hovered (armed) state first.

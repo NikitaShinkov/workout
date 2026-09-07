@@ -1,55 +1,25 @@
-// Persistence: one IndexedDB record holding the whole app state.
+// Persistence: the data repository, via js/sync.js.
 //
-// Why not localStorage: images are kept as Blobs. localStorage only stores
-// strings, so images would have to be base64 (+33% size) against a ~5MB quota -
-// that overflows after a handful of exercises and throws QuotaExceededError.
-// IndexedDB stores Blobs natively and has a far larger quota.
+// This file used to be one IndexedDB record. It is still the only seam the
+// store knows about - load once, hand over every change - but the data now
+// lives in git so that the computer and the phone are looking at one copy of
+// it rather than two unrelated ones.
+//
+// Nothing is read from the browser any more. The repo is the source of truth on
+// every launch; sync.js keeps a local copy purely so the app still opens with
+// no signal, and that copy is never authoritative.
 
-const DB_NAME = 'fitness_app';
-const DB_VERSION = 1;
-const STORE = 'state';
-const KEY = 'current';
+import { loadFromRepo, noteState } from './sync.js';
 
-let dbPromise = null;
-
-function openDb() {
-  if (dbPromise) return dbPromise;
-
-  dbPromise = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-
-  return dbPromise;
-}
-
+// The stored state, or null when the data repo has nothing in it yet - which
+// migrate() turns into a fresh install rather than an error.
 export async function loadState() {
-  try {
-    const db = await openDb();
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readonly');
-      const request = tx.objectStore(STORE).get(KEY);
-      request.onsuccess = () => resolve(request.result || null);
-      request.onerror = () => reject(request.error);
-    });
-  } catch (error) {
-    // A blocked or unavailable IndexedDB must not stop the page from rendering.
-    console.warn('Could not load saved data:', error);
-    return null;
-  }
+  return loadFromRepo();
 }
 
+// Handed the whole live state on every mutation. sync.js decides whether that
+// amounts to a change worth committing and when to send it; the store neither
+// knows nor waits.
 export async function saveState(state) {
-  const db = await openDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(state, KEY);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  noteState(state);
 }

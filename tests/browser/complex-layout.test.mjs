@@ -28,10 +28,6 @@ page.on('console', (m) => { if (m.type() === 'error') errs.push('console: ' + m.
 // somewhere to stick to.
 await page.setViewport({ width: 1400, height: 360, deviceScaleFactor: 2 });
 await page.goto(harness('seed=exercises'), { waitUntil: 'domcontentloaded' });
-await page.evaluate(() => new Promise((r) => {
-  const q = indexedDB.deleteDatabase('fitness_app');
-  q.onsuccess = q.onerror = q.onblocked = () => r();
-}));
 await page.goto(harness('seed=exercises&complexes=2,1,1&off=1'), { waitUntil: 'networkidle2' });
 await page.waitForSelector('.complex');
 await new Promise((r) => setTimeout(r, 700));

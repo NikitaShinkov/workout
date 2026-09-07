@@ -33,12 +33,12 @@ const errors = [];
 const origError = console.error;
 console.error = (...a) => errors.push(a.map(String).join(' '));
 
-const { initStore, activeCategory, addExercise, setUiFlag } = await mod('store.js');
+const { resetStore, activeCategory, addExercise, setUiFlag } = await mod('store.js');
 const { mountSchedulePage } = await mod('schedule-page.js');
 const { openExerciseModal, closeModal, isModalOpen } = await mod('exercise-modal.js');
 const { createExercise } = await mod('model.js');
 
-await initStore();
+resetStore();
 mountSchedulePage(document.getElementById('app'));
 
 const $ = (s) => document.querySelector(s);

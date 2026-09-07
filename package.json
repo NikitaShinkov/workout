@@ -9,7 +9,6 @@
     "test": "node tests/run.mjs"
   },
   "devDependencies": {
-    "fake-indexeddb": "^6.2.2",
     "jsdom": "^29.1.1",
     "puppeteer-core": "^25.10.0"
   }

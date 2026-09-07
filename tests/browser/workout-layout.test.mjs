@@ -29,10 +29,6 @@ const PHONE = { width: 393, height: 800, deviceScaleFactor: 2 };
 
 await page.setViewport(DESKTOP);
 await page.goto(harness('seed=exercises'), { waitUntil: 'domcontentloaded' });
-await page.evaluate(() => new Promise((r) => {
-  const q = indexedDB.deleteDatabase('fitness_app');
-  q.onsuccess = q.onerror = q.onblocked = () => r();
-}));
 await page.goto(harness('seed=exercises&complexes=2,1,1&multi&start=today'),
   { waitUntil: 'networkidle2' });
 await page.waitForSelector('.complex');
@@ -428,13 +424,13 @@ const mounted = () => page.evaluate(() => (
     : 'schedule'
 ));
 
-await page.goto(BASE + '/index.html#workout', { waitUntil: 'networkidle2' });
+await page.goto(BASE + '/index.html?offline=1#workout', { waitUntil: 'networkidle2' });
 await new Promise((r) => setTimeout(r, 500));
 check('10: #workout OPENS THE WORKOUT PAGE DIRECTLY', (await mounted()) === 'workout',
   await mounted());
 
 // A query string forces a real reload rather than a same-document hash change.
-await page.goto(BASE + '/index.html?a=1', { waitUntil: 'networkidle2' });
+await page.goto(BASE + '/index.html?offline=1&a=1', { waitUntil: 'networkidle2' });
 await new Promise((r) => setTimeout(r, 500));
 check('10: with no hash it still opens on the schedule', (await mounted()) === 'schedule',
   await mounted());
@@ -442,7 +438,7 @@ check('10: and the hash names the page on screen',
   (await page.evaluate(() => location.hash)) === '#schedule',
   await page.evaluate(() => location.hash));
 
-await page.goto(BASE + '/index.html?a=2#nonsense', { waitUntil: 'networkidle2' });
+await page.goto(BASE + '/index.html?offline=1&a=2#nonsense', { waitUntil: 'networkidle2' });
 await new Promise((r) => setTimeout(r, 500));
 check('10: a hash that names no page falls back to the schedule',
   (await mounted()) === 'schedule', await mounted());

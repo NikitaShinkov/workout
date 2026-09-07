@@ -12,3 +12,11 @@ desktop.ini
 
 # Test screenshots and diagnostics
 tests/.out/
+
+# Credentials. A token sitting in the working tree is one `git add -A` away from
+# a public repo, and GitHub revokes any token it finds in one - so the leak
+# costs you the token as well. Keep tokens OUTSIDE the project directory; these
+# rules are only a backstop.
+*token*
+*.token
+*secret*

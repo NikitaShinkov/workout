@@ -10,8 +10,9 @@ import {
   createComplexItem,
   uid,
 } from './model.js';
-import { DEFAULT_START_DATE } from './schedule.js';
+import { defaultStartDate } from './schedule.js';
 import { loadState, saveState } from './db.js';
+import { recordOp } from './sync.js';
 
 const STATE_VERSION = 2;
 
@@ -68,7 +69,10 @@ function normalizeComplexes(saved, exercises) {
 
 // Fill in anything a stored record predates, so an old save never crashes a
 // newer build. Version 1 had no category order and no category names.
-function migrate(stored) {
+//
+// Exported so the tests can drive it as the pure function it is, rather than
+// round-tripping a fixture through a fake database.
+export function migrate(stored) {
   const base = createInitialState();
   if (!stored || typeof stored !== 'object') return base;
 
@@ -105,7 +109,7 @@ function migrate(stored) {
       // (the schedule was not built yet), so both need a shape and a default.
       categories[id].complexes = normalizeComplexes(saved.complexes, categories[id].exercises);
       if (!categories[id].scheduleStartDate) {
-        categories[id].scheduleStartDate = DEFAULT_START_DATE;
+        categories[id].scheduleStartDate = defaultStartDate();
       }
     }
 
@@ -126,6 +130,20 @@ function migrate(stored) {
 
 export async function initStore() {
   state = migrate(await loadState());
+  return state;
+}
+
+// Put the store into a known state without touching storage. This is how the
+// tests reset between runs now that clearing a database no longer means
+// anything - a `deleteDatabase` call would be a silent no-op, which is the
+// worst kind of broken test.
+export function resetStore(seed) {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  state = migrate(seed || null);
+  for (const listener of listeners) listener(state);
   return state;
 }
 
@@ -294,13 +312,24 @@ export function reorderExercises(ids, insertIndex) {
   });
 }
 
+// `favorite` is the log's field, not state.json's - the workout page toggles it
+// on the phone and the schedule page toggles it on the computer, so it has to
+// come from the file both of them can write. The op is what actually persists;
+// the mutation below is only so the star flips at once.
 export function toggleFavorite(id, categoryId) {
+  let on = null;
+
   update((draft) => {
     const category = draft.categories[categoryId || draft.ui.activeCategory];
     if (!category) return;
     const exercise = category.exercises.find((e) => e.id === id);
-    if (exercise) exercise.favorite = !exercise.favorite;
+    if (!exercise) return;
+
+    exercise.favorite = !exercise.favorite;
+    on = exercise.favorite;
   });
+
+  if (on !== null) recordOp({ kind: 'favorite', exerciseId: id, on });
 }
 
 // --- complex operations ----------------------------------------------------

@@ -35,9 +35,9 @@ const origError = console.error;
 console.error = (...a) => errors.push(a.map(String).join(' '));
 
 const { openExerciseModal, closeModal, isModalOpen } = await mod('exercise-modal.js');
-const { initStore, getState, activeCategory, addExercise } = await mod('store.js');
+const { resetStore, getState, activeCategory, addExercise } = await mod('store.js');
 const { createExercise } = await mod('model.js');
-await initStore();
+resetStore();
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
