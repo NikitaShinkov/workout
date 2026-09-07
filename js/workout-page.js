@@ -58,10 +58,15 @@ let selectedDay = 0;
 let selectedComplexId = null;
 let previewIndex = 0;
 
-// The running image sequences, one per rendered slide. A render throws their
-// <img>s away, so they are torn down and rebuilt every time rather than left
-// ticking against detached nodes.
+// The running image sequences, one per rendered slide, each tagged with the
+// exercise it belongs to. A render throws their <img>s away, so they are torn
+// down and rebuilt every time rather than left ticking against detached nodes.
 let animations = [];
+
+// The frame each exercise had reached, carried across renders. Without it every
+// render restarts every sequence at frame one, and a swipe - which ends in a
+// render - made the picture jump back to the start just as it arrived.
+let frameByExercise = new Map();
 
 // The swipe in progress, and the timer that finishes it. Both hold nodes from
 // the current render, so both are dropped whenever the page is rebuilt.
@@ -90,8 +95,23 @@ export function mountWorkoutPage(container, navigate) {
 }
 
 function stopAnimations() {
-  for (const animation of animations) animation.destroy();
+  for (const { exerciseId, animation } of animations) {
+    // Remember where it got to before the node goes away.
+    frameByExercise.set(exerciseId, animation.index);
+    animation.destroy();
+  }
   animations = [];
+}
+
+// The swipe holds every rendered sequence still, so the picture the finger is
+// dragging does not change under it. stop() keeps the frame; start() resumes
+// from that frame rather than rewinding.
+function pauseAnimations() {
+  for (const { animation } of animations) animation.stop();
+}
+
+function resumeAnimations() {
+  for (const { animation } of animations) animation.start();
 }
 
 function cancelSettle() {
@@ -397,6 +417,8 @@ function attachSwipe(viewport, track, count) {
     };
     // The finger drives it directly from here; nothing may smooth that.
     track.style.transition = 'none';
+    // Hold the pictures still for the length of the gesture.
+    pauseAnimations();
 
     // So the gesture keeps its events even when the finger leaves the block.
     if (typeof viewport.setPointerCapture === 'function' && event.pointerId !== undefined) {
@@ -436,9 +458,21 @@ function release(travelled) {
   const { track, count, width } = drag;
   drag = null;
 
+  // The gesture is over, so the pictures move again - from the frame they were
+  // held on, not from the start.
+  resumeAnimations();
+
   const step = travelled <= -SWIPE_MIN_PX ? 1 : travelled >= SWIPE_MIN_PX ? -1 : 0;
   const target = previewIndex + step;
   const commits = step !== 0 && target >= 0 && target < count;
+
+  if (commits) {
+    // The Preview_bar answers the moment the finger lifts. Waiting for the
+    // settle to land made the whole page feel like it was lagging behind the
+    // gesture. Done by hand rather than by rendering, because a render here
+    // would replace the very track that is mid-glide.
+    markPreviewBar(target);
+  }
 
   if (!commits) {
     // Not far enough, or nothing there to go to. Either way the block is
@@ -465,6 +499,16 @@ function release(travelled) {
 function glide(track, x, ms, easing) {
   track.style.transition = 'transform ' + ms + 'ms ' + easing;
   track.style.transform = 'translateX(' + x + 'px)';
+}
+
+// Which segment reads as current, without going through a render.
+function markPreviewBar(index) {
+  if (!root) return;
+
+  const segments = root.querySelectorAll('.preview-bar__segment');
+  segments.forEach((segment, at) => {
+    segment.classList.toggle('preview-bar__segment--active', at === index);
+  });
 }
 
 function renderComplexList(day, selected) {
@@ -542,8 +586,9 @@ function startAnimations(card) {
     if (!exercise || !exercise.images.length) continue;
 
     const animation = createSequenceAnimation(slide);
-    animation.setFrames(exercise.images.map(blobUrl));
-    animations.push(animation);
+    // Picked up where this exercise left off, so a render is invisible.
+    animation.setFrames(exercise.images.map(blobUrl), frameByExercise.get(exercise.id) || 0);
+    animations.push({ exerciseId: exercise.id, animation });
   }
 }
 
@@ -552,4 +597,5 @@ export function resetWorkoutState() {
   selectedDay = 0;
   selectedComplexId = null;
   previewIndex = 0;
+  frameByExercise = new Map();
 }

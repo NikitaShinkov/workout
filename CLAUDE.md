@@ -34,7 +34,8 @@ js/category-button.js the insides of a category button - ditto, see gotcha 16
 js/exercise-row.js    Exercise_block itself, shared by the first two pages
 js/toolbar-inputs.js  the masked date field and the guarded interval field
 js/exercise-modal.js  Add/edit popup
-js/animation.js       the hover image sequence
+js/animation.js       the hover image sequence; resumable, see setFrames
+js/loading.js         the loading screen - the logo, turning
 js/images.js          File -> Blob, and blob URLs
 js/dom.js             el() / svg() / clear() - no framework, just these
 ```
@@ -115,6 +116,14 @@ Reads need no token (60/hour per address); writes do (5000/hour).
 `?offline=1` skips the network entirely — that is how the browser suites drive
 the real `index.html` without depending on a repo, a token or a connection.
 
+**The loading screen** (`js/loading.js`) covers that first fetch. `showLoading()`
+returns the function that removes it. `rotateY` with **no perspective** is what
+makes the logo squash rather than swing — an orthographic flip, which is the
+"horizontal distortion" the brief asked for — and `alternate` on an 800ms
+iteration is what plays the second half in reverse with the easing mirrored, so
+both directions ease in and out. Measured: scale 1 at 0ms, ~0 (edge on) at
+400ms, −1 at 800ms.
+
 ## Figma
 
 File key `ULWMwUv9ivvkRUaHA1JikX`, connected via the `figma` MCP server declared
@@ -136,6 +145,13 @@ in `.mcp.json`. Load the `figma-design-to-code` guidance before
 | `139:5578` | Header with Page_selector — **not yet seen, see below** |
 | `139:5487` | Page_selector states — **not yet seen** |
 | `139:4737` | Calendar_page — **not yet seen** |
+
+The loading screen came from `design/raw/Download_1.json` and `Download_2.json`:
+a 236×190 logo in `--not-selected` on the `--bg` ground, the second frame the
+same logo rotated 180°. **The exported `app_logo.svg` is a four-colour gradient**
+and the loading frame is flat grey, so it is painted as a CSS mask over
+`--not-selected` — the Page_selector trick again, for the same reason: the
+exported fill is wrong for this context and only the geometry is wanted.
 
 **The Figma MCP is on the Starter plan and its call limit is exhausted.** The
 Page_selector, the new header and the whole calendar page were built from the
@@ -437,9 +453,21 @@ else.
   only `EDGE_RESISTANCE` (0.28) of the travel, capped at `EDGE_MAX_PX` (56), so
   the end is felt rather than hit. On release it either glides on to the next
   slide (200ms, an ease-out that starts fast so the gesture reads as finished)
-  or springs back (260ms, gentler). `previewIndex` changes when that timer
-  lands, NOT on pointerup — so a test has to wait the settle out before
-  asserting anything about which exercise is showing.
+  or springs back (260ms, gentler).
+- **The gesture holds the pictures still.** Every rendered sequence is paused on
+  pointerdown and resumed on release — `stop()` keeps the frame and `start()`
+  picks up from it — so the image the finger is dragging cannot change under it.
+- **`previewIndex` changes when the settle timer lands, not on pointerup**, so a
+  test must wait the settle out before asserting which exercise is *showing*.
+  The **Preview_bar is the exception**: `markPreviewBar()` moves the active
+  segment by hand the instant the finger lifts, because waiting 200ms for the
+  settle made the whole page feel like it lagged behind the gesture. By hand and
+  not by rendering, for the usual reason — a render would replace the very track
+  that is mid-glide.
+- **Frames survive a render.** `frameByExercise` remembers where each exercise's
+  sequence had got to, and `setFrames(urls, startAt)` puts it back. Without it
+  every render — and a swipe ends in one — restarted every animation at frame
+  one, so the picture flinched exactly as it arrived.
 
 ## Not built yet, by design
 
@@ -485,7 +513,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 21 suites, ~790 checks, ~95s
+npm test             all 21 suites, ~800 checks, ~100s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```

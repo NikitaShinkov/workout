@@ -20,7 +20,7 @@ npm install
 npm test
 ```
 
-21 suites, about 790 checks, ~95 seconds. The logic suites run under jsdom; the
+21 suites, about 800 checks, ~100 seconds. The logic suites run under jsdom; the
 layout ones drive the Chrome or Edge already installed on the machine (set
 `CHROME_PATH` if it is somewhere unusual). `npm test -- jsdom` runs a subset.
 

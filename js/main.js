@@ -3,6 +3,7 @@
 import { initToken, watchForHide, flush, hasToken } from './sync.js';
 import { initStore } from './store.js';
 import { mountApp } from './app.js';
+import { showLoading } from './loading.js';
 
 async function start() {
   const app = document.getElementById('app');
@@ -13,12 +14,12 @@ async function start() {
   initToken();
 
   // The state now comes over the network, so there is a moment with nothing to
-  // show. Better a word than a blank screen.
-  app.textContent = 'Загрузка…';
+  // show.
+  const hideLoading = showLoading(app);
 
   await initStore();
 
-  app.textContent = '';
+  hideLoading();
   mountApp(app);
 
   // Being hidden is the last moment a browser reliably gives us. It is not

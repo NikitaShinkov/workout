@@ -53,9 +53,14 @@ export function createSequenceAnimation(container, options) {
   return {
     // Replacing frames takes effect at once: reordering thumbnails must show up
     // in the animation without waiting for the next tick.
-    setFrames(next) {
+    //
+    // `startAt` is how a sequence survives a re-render. The workout page throws
+    // its rows away and builds them again on every render, and restarting every
+    // exercise from frame one made the whole page flinch; it hands back the
+    // frame each exercise had reached instead.
+    setFrames(next, startAt = 0) {
       frames = Array.from(next || []);
-      index = 0;
+      index = frames.length ? ((startAt % frames.length) + frames.length) % frames.length : 0;
       show();
       start();
     },
@@ -63,12 +68,17 @@ export function createSequenceAnimation(container, options) {
       period = ms;
       if (timer !== null) start();
     },
+    // stop() and start() are also pause and resume: stop clears the timer and
+    // leaves the frame where it is, and start picks up from that frame rather
+    // than rewinding. The workout page's swipe holds the picture still that way.
     start,
     stop,
     destroy() {
       stop();
       img.remove();
     },
+    // Which frame is on screen, so a caller can put it back after a re-render.
+    get index() { return index; },
     get element() { return img; },
   };
 }

@@ -365,6 +365,56 @@ check('7: SWIPING RIGHT ON THE FIRST ONE DOES NOT WRAP', (await activeSegment())
   await activeSegment());
 check('7: and springs back here too', (await paintedX()) === 0, await paintedX());
 
+// ---------- 7d. the gesture holds the picture still, and answers at once ----
+
+// The frames cycle every 400ms, so a hold longer than that would change the
+// picture if the sequence were still running.
+await page.mouse.move(mid, y);
+await page.mouse.down();
+await page.mouse.move(mid - 50, y);
+const heldAt = await frameSrc();
+await new Promise((r) => setTimeout(r, 700));
+const heldAfter = await frameSrc();
+
+check('7d: THE ANIMATION HOLDS ITS FRAME FOR THE LENGTH OF THE SWIPE',
+  Boolean(heldAt) && heldAt === heldAfter, heldAt === heldAfter ? 'held' : 'it moved');
+
+// Releasing must answer immediately - waiting for the settle to land is what
+// made the page feel like it lagged behind the finger.
+await page.mouse.move(mid - 150, y);
+await page.mouse.up();
+const segmentAtOnce = await activeSegment();
+const paintedAtOnce = await paintedX();
+
+check('7d: THE PREVIEW BAR SWITCHES THE INSTANT THE FINGER LIFTS',
+  segmentAtOnce === 1, segmentAtOnce);
+check('7d: while the track is still gliding - the bar does not wait for it',
+  paintedAtOnce !== 0, paintedAtOnce);
+
+await settled();
+check('7d: and the bar still agrees once the settle has landed',
+  (await activeSegment()) === 1, await activeSegment());
+
+// And the picture carries on rather than restarting, even though the settle
+// re-renders the whole page around the new index.
+//
+// Sampled repeatedly rather than compared at two points: there are only two
+// frames, so two samples a whole cycle apart can legitimately match and the
+// check would fail at random.
+const everyFrame = () => page.$$eval('.workout-preview__slide img',
+  (n) => n.map((i) => i.getAttribute('src')).join('|'));
+
+const seen = new Set();
+for (let i = 0; i < 8; i += 1) {
+  seen.add(await everyFrame());
+  await new Promise((r) => setTimeout(r, 120));
+}
+check('7d: THE SEQUENCE IS RUNNING AGAIN once the gesture is over',
+  seen.size > 1, seen.size + ' distinct frame(s) in ~1s');
+
+await swipe(150);
+check('7d: back to the first exercise', (await activeSegment()) === 0, await activeSegment());
+
 // ---------- 8. the phone ----------
 
 await page.setViewport(PHONE);
