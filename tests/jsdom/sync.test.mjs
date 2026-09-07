@@ -418,6 +418,28 @@ check('7b: A LATER WRITE DOES NOT BOOTSTRAP AGAIN',
   repo.bootstrapped === null && JSON.parse(repo.files[LOG_PATH]).ops.length === 2,
   repo.bootstrapped + ' / ' + JSON.parse(repo.files[LOG_PATH]).ops.length);
 
+// ---------- 7c. showing an image that lives in the data repo ----------
+//
+// The paths in state.json are relative to the DATA repo, and the data repo is
+// not the site - so a relative src would resolve against the page and 404.
+// This was live and broken for one commit: rawUrl() existed and nothing called
+// it, and the bug is invisible until a reload, because a freshly picked image
+// is still a Blob and shows from an object URL.
+
+const { blobUrl } = await mod('images.js');
+const shown = blobUrl('data/images/3bc785bb263c1542.jpg');
+
+check('7c: A STORED IMAGE PATH RESOLVES TO THE DATA REPO, not the page',
+  shown === 'https://raw.githubusercontent.com/NikitaShinkov/workout-data/main/'
+    + 'data/images/3bc785bb263c1542.jpg', shown);
+check('7c: it is absolute, so it cannot resolve against the site root',
+  shown.startsWith('https://'), shown);
+check('7c: something already a URL is left alone',
+  blobUrl('https://example.com/x.jpg') === 'https://example.com/x.jpg');
+check('7c: and a Blob still becomes an object URL',
+  blobUrl(new dom.window.Blob(['x'])).startsWith('blob:'),
+  blobUrl(new dom.window.Blob(['x'])));
+
 // ---------- 8. the token in the bookmark ----------
 
 localStorage.removeItem('workout.token');

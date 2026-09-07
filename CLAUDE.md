@@ -56,6 +56,10 @@ js/dom.js             el() / svg() / clear() - no framework, just these
 - **Images are content-addressed** (`data/images/<sha256-16>.jpg`), so they are
   immutable, cacheable for ever, and deduplicated. Only the two JSON files are
   ever re-read, and only they need cache-busting.
+  The path stored in `state.json` is **relative to the data repo**, so the owner
+  and repo name stay out of the data. `blobUrl()` resolves it through
+  `rawUrl()` at display time - the data repo is not the site, so a relative
+  `src` would resolve against the page and 404.
 - **Cyclic schedule rotation**: enabled complexes take turns, one every
   `interval` days, repeating. (Not implemented yet — see Not built.)
 - **A complex item points at an exercise, it does not copy it.**

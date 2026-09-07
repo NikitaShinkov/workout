@@ -4,6 +4,8 @@
 // stored data stays small - which matters now for the IndexedDB quota, and
 // later for the size of what gets committed to the repo.
 
+import { rawUrl, IMAGE_DIR } from './config.js';
+
 const MAX_EDGE = 1400;
 const QUALITY = 0.82;
 
@@ -40,7 +42,15 @@ const urlCache = new WeakMap();
 
 export function blobUrl(blob) {
   if (!blob) return '';
-  if (typeof blob === 'string') return blob; // already a URL
+
+  // A stored image is a path inside the DATA repo, and the data repo is not the
+  // site - so a relative path would resolve against the page and 404. It has to
+  // be pointed at the repo's raw host. Paths are kept relative in state.json on
+  // purpose: the owner and repo name stay out of the data, so renaming or
+  // forking the repo does not break every exercise.
+  if (typeof blob === 'string') {
+    return blob.startsWith(IMAGE_DIR + '/') ? rawUrl(blob) : blob;
+  }
 
   let url = urlCache.get(blob);
   if (!url) {
