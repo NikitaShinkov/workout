@@ -444,6 +444,36 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     1 January. Stored as ISO now; `"3 сен"` is display only. Verified either
     side of the boundary.
 
+25. **A borrowed hover fill has to yield to the real one, and that takes CSS.**
+    The linked row's class is dropped when the pointer really arrives in
+    Exercise_list — but Up/Down work from anywhere on the page, so the pointer
+    may ALREADY be over the list when a keypress sets the highlight, and a
+    pointer that is already there arrives nowhere (gotcha 26), so nothing
+    fires and two rows would look hovered at once.
+    `.exercise-list:hover .exercise-row--linked:not(:hover)` clears the fill
+    for as long as the pointer is in the list, and the `:not(:hover)` is
+    load-bearing: without it that rule (three classes) outranks
+    `.exercise-row:hover` (two) and the hovered row itself would go
+    transparent — the one row that must keep its fill. `mouseleave` clears the
+    class as well, so a highlight the pointer has sat through cannot reappear
+    behind it.
+
+26. **A render under a stationary pointer fires `mouseenter` on the new node.**
+    Every keyboard move re-renders, which replaces Exercise_list — and Chrome
+    then re-runs hit-testing and dispatches `mouseenter` to the fresh element
+    the pointer is now "over", though the pointer never moved. The handler that
+    ends the borrowed highlight ran on that, so navigating with the pointer
+    resting anywhere over Exercise_list threw the highlight away the instant it
+    was set. Both crossing handlers now return early while hover is parked:
+    while the park is on, nothing about the pointer counts as it arriving
+    anywhere. The mirror case is the pointer that is inside the list when the
+    park is *lifted* — no mouseenter fires for a pointer already there, and the
+    swallowed one is not coming back, so `onDocumentMouseMove` ends the
+    highlight itself when the movement happened inside the list.
+    Same family as gotcha 15 and 9: a render throws away the node an
+    interaction was living on, and the events that follow are about the new
+    node, not about the user.
+
 ## Pages
 
 `js/app.js` is the shell: it mounts one page into `#app` and swaps it on
@@ -544,6 +574,41 @@ else.
   ids) or `'complex'` (complex ids). Selecting in one scope replaces the whole
   selection, which is what makes the spec's mutual-exclusion rules fall out for
   free and lets Del dispatch without guessing which list it means.
+- **Up/Down move the selection, Shift extends it, Ctrl+Shift takes it to the
+  end of the list.** The selection carries a `focus` alongside its `anchor` —
+  the anchor is what a range grows FROM, the focus is what the next key moves
+  from — and `moveSelection()` works in all three scopes. **Inside a complex
+  "the list" is that complex's own blocks.** Item keys are flattened across
+  every complex so that a shift-CLICK can still span them, but `navBounds()`
+  confines the keyboard to the one the cursor is in: Down on a complex's last
+  block does nothing, and Ctrl+Shift+Down stops at its end rather than running
+  into the next complex. A key that cannot move changes nothing at all.
+- **Enter groups the Exercise_list selection into one complex** at the end of
+  the list — the same thing Ctrl+G does, from a key that needs no modifier.
+  Both go through `groupLibrarySelection()`, which returns false when the
+  selection is not in Exercise_list so the key is left to the browser rather
+  than swallowed. Ctrl+G is matched on `event.code` and Enter on `event.key`,
+  because Enter is layout-safe and the letter keys are not (gotcha 5).
+- **A keyboard move parks hover until the mouse moves.** The keys move the
+  selection and the pointer stays where it was left, so the block under it
+  would go on drawing its hover fill — and two filled blocks read as two
+  selections, which the selection model forbids outright. So a move that lands
+  somewhere puts `hover-off` on the `<body>`, which **every hover half in the
+  stylesheet is guarded against** (`body:not(.hover-off)`); the selected halves
+  are never guarded, because a selection is not a hover. The park is lifted by
+  the first `mousemove` whose coordinates really differ from the last —
+  comparing them matters, since Chrome emits a mousemove after a programmatic
+  scroll and a keyboard move scrolls both lists. A key that could not move
+  parks nothing: it changed nothing to be confused with.
+- **Selecting a block inside a complex points Exercise_list at the exercise it
+  references**: that row scrolls to the middle of the list and borrows the
+  hover fill (`exercise-row--linked`). It does **not** become selected — there
+  is one selection on the page and it stays on the block that was clicked.
+  Only a plain click or a plain Up/Down re-points it; Shift and Ctrl leave the
+  highlight on the block the run started from, which is what the spec asks
+  for. The pointer reaching Exercise_list ends it —
+  `clearLinkedHighlight()` drops the class by hand, because gotcha 15 forbids
+  re-rendering from a mouse handler — and gotcha 25 is the other half of that.
 - Dropping onto an exercise row inside a complex inserts into that complex;
   dropping on a complex's outer 12px band, on the side block or in the empty
   space below makes a new complex at that boundary. Dragging a whole complex
@@ -766,7 +831,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 24 suites, ~1065 checks, ~135s
+npm test             all 26 suites, ~1150 checks, ~155s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -776,10 +841,11 @@ process and prints a summary. **Run it after any change** — it is fast and it
 covers behaviour that is easy to break silently.
 
 - `tests/jsdom/` — logic: store, modal, selection, categories, undo, drag,
-  complexes, the workout page, the exercise page, and the data-repo sync. **Nothing here touches
-  the network**: the suites call `resetStore(seed)` rather than `initStore()`,
-  and `sync.test.mjs` replaces `fetch` with a fake GitHub that records what was
-  committed. `migrate()` is exported and tested as the pure function it is,
+  complexes, keyboard selection, the workout page, the exercise page, and the
+  data-repo sync. **Nothing here touches the network**: the suites call
+  `resetStore(seed)` rather than `initStore()`, and `sync.test.mjs` replaces
+  `fetch` with a fake GitHub that records what was committed. `migrate()` is
+  exported and tested as the pure function it is,
   against the same version-1 fixture as before.
   `complexes.test.mjs` installs a **fake layout engine** (`layout()`) that gives
   every complex and row a rect, because every drop decision is geometric and
@@ -789,9 +855,13 @@ covers behaviour that is easy to break silently.
   driving the Chrome or Edge already installed (`CHROME_PATH` overrides the
   search). jsdom has no layout engine and no `:hover`, so these are the only
   place geometry can be checked.
-  Which browser suite covers what: `calendar` the page swap and the calendar
-  page, `workout-layout` the workout page, its phone breakpoint, its swipe and
-  the hash routing, `exercise-layout` the exercise page — top_block floating
+  Which browser suite covers what: `list-sync` the two schedule-page lists
+  read together — the centring scroll, the borrowed hover fill, the real
+  `:hover` taking it back and hover parked by a keyboard move, plus
+  Shift+Down and Enter driven from a real keyboard — `calendar` the page swap
+  and the calendar page, `workout-layout` the workout page, its phone
+  breakpoint, its swipe and the hash routing, `exercise-layout` the exercise
+  page — top_block floating
   over the picture, the description sizing itself to its text, the Toolbar,
   Button_next and its ring, the swipe onto the sheet and how the sheet divides
   the block — `loading` the loading screen and its turn, `toolbar` the two
@@ -804,7 +874,9 @@ covers behaviour that is easy to break silently.
   still there, and `workout-layout` holds a pointer down to catch the swipe
   mid-gesture.
 - `tests/browser/harness.html` seeds the app without the file picker:
-  `?seed=plain|exercises|text`, `&extras`, `&popup=N`, `&complexes=2,1,1`
+  `?seed=plain|exercises|text`, `&extras`, `&popup=N`, `&rows=N` (repeat the
+  seeded exercises up to N numbered rows, so Exercise_list is long enough to
+  scroll), `&complexes=2,1,1`
   (complex sizes, cut from the seeded exercises), `&off=1` (switch #1 off),
   `&multi` (a second category with its own complexes), `&start=today` (move
   every category's start date to today, which is the only way the workout page

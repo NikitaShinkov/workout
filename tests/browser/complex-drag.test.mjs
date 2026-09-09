@@ -256,6 +256,13 @@ await page.evaluate(() => {
 await new Promise((r) => setTimeout(r, 150));
 check('selecting a block does not scroll the list either',
   (await scrollTop()) === 60, await scrollTop());
+// It does scroll the OTHER list, on purpose: selecting a block inside a
+// complex centres the exercise it references in Exercise_list. Section 8 drags
+// from a library row, so that row has to be back on screen first - a
+// page.mouse.drag() whose start point is not over a draggable element hangs
+// for ever with nothing logged.
+await page.$eval('.exercise-list', (n) => { n.scrollTop = 0; });
+await new Promise((r) => setTimeout(r, 100));
 
 // Switching a complex out of the schedule re-renders the whole page too.
 await page.evaluate(() => {

@@ -81,6 +81,8 @@ export function stopAllRowAnimations() {
 
 // options:
 //   selected      draws the selected fill
+//   linked        draws the HOVER fill without selecting: Exercise_list marking
+//                 the exercise that the block selected in a complex points at
 //   draggable     false on the calendar, where the order is the schedule's
 //   dataset       whatever the owning list needs to read back off the node
 //   showIndicators / showFavorites
@@ -98,7 +100,10 @@ export function renderExerciseRow(exercise, options = {}) {
   const row = el(
     'div',
     {
-      class: 'exercise-row' + (options.selected ? ' exercise-row--selected' : ''),
+      class:
+        'exercise-row' +
+        (options.selected ? ' exercise-row--selected' : '') +
+        (options.linked ? ' exercise-row--linked' : ''),
       draggable: options.draggable === false ? 'false' : 'true',
       dataset: options.dataset || null,
       onClick: options.onClick || null,

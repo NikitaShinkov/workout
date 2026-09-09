@@ -654,7 +654,12 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   overflow: hidden;
 }
 
-.complex:hover,
+/* `body:not(.hover-off)` on every hover half below: a keyboard move parks
+   hover, because the pointer has not moved and whatever it is left sitting on
+   must not go on looking picked out - two filled blocks read as two
+   selections. The selected halves are never guarded; a selection is not a
+   hover. See "hover is parked by a keyboard move" in js/schedule-page.js. */
+body:not(.hover-off) .complex:hover,
 .complex--selected {
   background: var(--hover-bg);
 }
@@ -703,7 +708,7 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   visibility: hidden;
 }
 
-.complex:hover .switch--complex,
+body:not(.hover-off) .complex:hover .switch--complex,
 .complex--selected .switch--complex,
 .switch--complex:focus-within {
   visibility: visible;
@@ -742,7 +747,7 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
 
 /* A row picked out inside a complex needs to stand apart from the complex's own
    hover fill, which is already --hover-bg. */
-.complex .exercise-row:hover,
+body:not(.hover-off) .complex .exercise-row:hover,
 .complex .exercise-row--selected {
   background: var(--hover-bg-block);
 }
@@ -797,9 +802,28 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   user-select: none;
 }
 
-.exercise-row:hover,
+body:not(.hover-off) .exercise-row:hover,
 .exercise-row--selected {
   background: var(--hover-bg);
+}
+
+/* The row Exercise_list is pointing at, because the block that references it is
+   selected over in Complex_list. It borrows the hover fill and nothing else:
+   it is not selected, and there is only ever one selection on the page. */
+.exercise-row--linked {
+  background: var(--hover-bg);
+}
+
+/* A live hover in this list wins outright: the row under the cursor keeps its
+   fill and the pointed-at row gives its up, so only one row in Exercise_list is
+   ever filled. Usually the class is gone before this can matter - a pointer
+   that moves inside the list ends the highlight itself - but this is the
+   backstop that makes "only one" true whatever order the events arrive in.
+   Guarded like every other hover half, and that part is not cosmetic: while a
+   keyboard move has hover parked, the pointed-at row is the ONLY fill there
+   should be, and this rule would take it away. */
+body:not(.hover-off) .exercise-list:hover .exercise-row--linked:not(:hover) {
+  background: transparent;
 }
 
 .exercise-row--dragging {

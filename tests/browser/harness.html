@@ -28,6 +28,8 @@
     //   &start=today     schedule every category from today, so the workout
     //                    page - which only ever looks at today, tomorrow and
     //                    the day after - has something to show
+    //   &rows=N          repeat the seeded exercises up to N rows, numbered, so
+    //                    Exercise_list is long enough to scroll
     //   &images=N        seed N images per exercise instead of two, which is
     //                    how the exercise page's sheet of every image gets one,
     //                    a pair and a grid to lay out
@@ -88,7 +90,13 @@
     if (seed === 'exercises' || seed === 'text') {
       const rows = seed === 'text' ? TEXT_CASES : EXERCISES;
       const count = Number(params.get('images')) || (seed === 'text' ? 1 : 2);
-      for (let i = 0; i < rows.length; i += 1) {
+      // &rows cycles the definitions above until there are that many, and
+      // numbers the names so each row is still recognisable. Without it the
+      // seed is exactly as it was, because suites assert on these names.
+      const many = Number(params.get('rows')) || 0;
+      const total = many || rows.length;
+      for (let i = 0; i < total; i += 1) {
+        const source = rows[i % rows.length];
         const images = [];
         for (let n = 0; n < count; n += 1) {
           images.push(await makeImage(
@@ -96,7 +104,10 @@
             COLORS[(i + n) % COLORS.length]));
         }
         addExercise(createExercise({
-          name: rows[i][0], description: rows[i][1], images, equipment: ['mat'],
+          name: source[0] + (many ? ' ' + (i + 1) : ''),
+          description: source[1],
+          images,
+          equipment: ['mat'],
         }));
       }
     }

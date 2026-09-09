@@ -53,8 +53,36 @@ import {
 // A single scoped set is what makes the spec's exclusion rules fall out for
 // free: selecting anywhere drops whatever was selected somewhere else, so Del
 // never has to guess which of the three lists it is aimed at.
-const EMPTY_SELECTION = { scope: null, ids: new Set(), anchor: null };
+//
+// `anchor` is the index a Shift range grows from; `focus` is the one the arrow
+// keys move, and the two are the same until a range is started.
+const EMPTY_SELECTION = { scope: null, ids: new Set(), anchor: null, focus: null };
 let selection = EMPTY_SELECTION;
+
+// The library row Complex_list is currently pointing at, drawn in the hover
+// fill so the two lists can be read together. It is NOT a selection - there is
+// one of those on the page and it stays on the block that was clicked. Cleared
+// the moment the pointer reaches Exercise_list, because from then on the row
+// under the cursor is the one that should look hovered.
+let linkedExerciseId = null;
+// Set with it when the list should also scroll that row to the middle: on a
+// click and on a plain Up/Down, never on a Shift or Ctrl extension.
+let pendingCenter = false;
+
+// --- hover is parked by a keyboard move ------------------------------------
+//
+// The keys move the selection but not the pointer, so the block the pointer
+// happens to be left on would go on drawing its hover fill - and two filled
+// blocks read as two selections, which is exactly what the selection model
+// forbids. So a move that lands somewhere else parks hover: `hover-off` on the
+// body, which every hover half in the stylesheet is guarded against. It is
+// lifted by the first mouse movement that is really a movement - the pointer
+// arrives wherever it now is and hover resumes from there.
+let hoverParked = false;
+// The last position seen, so a mousemove that did not actually move - Chrome
+// emits those after a programmatic scroll, and a keyboard move scrolls both
+// lists - cannot lift the park it was meant to leave alone.
+let pointerAt = null;
 
 // Id of the category whose name is being edited inline, if any.
 let editingCategoryId = null;
@@ -111,6 +139,7 @@ export function mountSchedulePage(container, navigate) {
 
   document.addEventListener('keydown', onDocumentKeydown);
   document.addEventListener('click', onDocumentClick);
+  document.addEventListener('mousemove', onDocumentMouseMove);
 
   const unsubscribe = subscribe(render);
   render();
@@ -133,6 +162,8 @@ export function mountSchedulePage(container, navigate) {
     unsubscribe();
     document.removeEventListener('keydown', onDocumentKeydown);
     document.removeEventListener('click', onDocumentClick);
+    document.removeEventListener('mousemove', onDocumentMouseMove);
+    releaseHover(); // the class outlives the page otherwise
     pagePicker.remove();
     pagePicker = null;
 
@@ -231,13 +262,16 @@ function selectAt(event, scope, index) {
   if (event.shiftKey && anchor !== null) {
     const from = Math.min(anchor, index);
     const to = Math.max(anchor, index);
-    selection = { scope, ids: new Set(keys.slice(from, to + 1)), anchor };
+    selection = { scope, ids: new Set(keys.slice(from, to + 1)), anchor, focus: index };
   } else if (event.ctrlKey || event.metaKey) {
     if (ids.has(key)) ids.delete(key);
     else ids.add(key);
-    selection = { scope, ids, anchor: index };
+    selection = { scope, ids, anchor: index, focus: index };
   } else {
-    selection = { scope, ids: new Set([key]), anchor: index };
+    selection = { scope, ids: new Set([key]), anchor: index, focus: index };
+    // A plain click re-points Exercise_list; Shift and Ctrl deliberately leave
+    // the highlight on whatever the run started from.
+    linkLibraryTo(scope, key);
   }
 
   render();
@@ -245,6 +279,200 @@ function selectAt(event, scope, index) {
 
 function clearSelection() {
   selection = EMPTY_SELECTION;
+  linkedExerciseId = null;
+  pendingCenter = false;
+}
+
+// --- keyboard navigation ---------------------------------------------------
+//
+// Up/Down move the selected block; Shift+Up/Down grow a range from the anchor;
+// Ctrl+Shift+Up/Down take that range to the end of the list. "The list" is the
+// whole of Exercise_list or of Complex_list - but inside a complex it is that
+// complex's own blocks, so a range never runs on into its neighbour. navBounds
+// is where that is worked out; the rest of this is index arithmetic.
+function moveSelection(step, event) {
+  const scope = selection.scope;
+  const keys = scopeKeys(scope);
+  const at = focusedIndex(keys, step);
+  if (at < 0) return;
+
+  const bounds = navBounds(scope, keys, at);
+  const first = bounds[0];
+  const last = bounds[1];
+
+  const extend = event.shiftKey;
+  const toEnd = extend && (event.ctrlKey || event.metaKey);
+
+  const next = toEnd ? (step > 0 ? last : first) : at + step;
+  // At the end of the list there is nowhere to go, and a key that did nothing
+  // must not change the selection either.
+  if (next < first || next > last) return;
+
+  if (extend) {
+    // Clamped: a shift-CLICK may have left the anchor in another complex, and
+    // the keyboard never selects across two of them.
+    const anchor = clampIndex(selection.anchor === null ? at : selection.anchor, first, last);
+    const from = Math.min(anchor, next);
+    const to = Math.max(anchor, next);
+    selection = { scope, ids: new Set(keys.slice(from, to + 1)), anchor, focus: next };
+  } else {
+    selection = { scope, ids: new Set([keys[next]]), anchor: next, focus: next };
+    linkLibraryTo(scope, keys[next]);
+  }
+
+  // Only a move that went somewhere parks hover: a key that could not move
+  // changed nothing, so there is nothing for a stale fill to be confused with.
+  parkHover();
+
+  render();
+  revealFocus(scope, keys[next]);
+}
+
+function clampIndex(index, first, last) {
+  return Math.max(first, Math.min(last, index));
+}
+
+// Hover contributes nothing until the pointer moves again. The class goes on
+// the body rather than on a rendered node so that it survives the render this
+// move is about to do.
+function parkHover() {
+  if (hoverParked) return;
+  hoverParked = true;
+  document.body.classList.add('hover-off');
+}
+
+function releaseHover() {
+  if (!hoverParked) return;
+  hoverParked = false;
+  document.body.classList.remove('hover-off');
+}
+
+function onDocumentMouseMove(event) {
+  const moved = !pointerAt || pointerAt.x !== event.clientX || pointerAt.y !== event.clientY;
+  pointerAt = { x: event.clientX, y: event.clientY };
+  if (!moved) return;
+
+  releaseHover();
+
+  // A pointer that was already inside Exercise_list when the park was lifted
+  // gets no mouseenter of its own, and the one the park swallowed is not coming
+  // back - so this is where a highlight the pointer has moved over is ended.
+  // clearLinkedHighlight returns at once when there is nothing to clear.
+  const target = event.target;
+  if (target && target.closest && target.closest('.exercise-list')) clearLinkedHighlight();
+}
+
+// Where the arrows move FROM: the focus left by the last click or keypress, or
+// - if that has gone stale, after a delete, a filter or a category switch - the
+// near end of what is still selected, in the direction of travel.
+function focusedIndex(keys, step) {
+  const at = selection.focus;
+  if (at !== null && keys[at] !== undefined && selection.ids.has(keys[at])) return at;
+
+  const hits = [];
+  keys.forEach((key, index) => {
+    if (selection.ids.has(key)) hits.push(index);
+  });
+  if (hits.length === 0) return -1;
+  return step > 0 ? hits[hits.length - 1] : hits[0];
+}
+
+// The stretch of scopeKeys the arrows may move within, inclusive. Item keys are
+// flattened across every complex so a shift-CLICK can span them; the keyboard
+// is confined to one complex, so this walks the same visible complexes that
+// renderComplexList numbers the items over and returns the span of the one the
+// cursor is in.
+function navBounds(scope, keys, index) {
+  if (scope !== 'item') return [0, keys.length - 1];
+
+  const state = getState();
+  const category = activeCategory();
+  let start = 0;
+  for (const complex of visibleComplexes(state, category)) {
+    const count = visibleItems(state, category, complex).length;
+    if (index < start + count) return [start, start + count - 1];
+    start += count;
+  }
+  return [0, keys.length - 1];
+}
+
+// Keep the block the arrows moved to inside its own scrollport, and only as far
+// as the near edge - centring Exercise_list is a different job, below.
+function revealFocus(scope, key) {
+  if (!root) return;
+
+  const list = root.querySelector(scope === 'library' ? '.exercise-list' : '.complex-list');
+  if (!list) return;
+
+  const selector = scope === 'complex' ? '.complex' : '.exercise-row';
+  const node = list.querySelector(selector + '[data-id="' + key + '"]');
+  if (!node) return;
+
+  const listBox = list.getBoundingClientRect();
+  const box = node.getBoundingClientRect();
+  if (box.top < listBox.top) list.scrollTop += box.top - listBox.top;
+  else if (box.bottom > listBox.bottom) list.scrollTop += box.bottom - listBox.bottom;
+}
+
+// --- the two lists, read together ------------------------------------------
+//
+// Selecting a block inside a complex points Exercise_list at the exercise that
+// block references: the row scrolls to the middle of the list and is drawn in
+// the hover fill. It does not become selected.
+function linkLibraryTo(scope, key) {
+  linkedExerciseId = scope === 'item' ? exerciseIdForItem(key) : null;
+  pendingCenter = linkedExerciseId !== null;
+}
+
+function exerciseIdForItem(itemId) {
+  const category = activeCategory();
+  if (!category) return null;
+
+  for (const complex of category.complexes || []) {
+    const item = complex.items.find((entry) => entry.id === itemId);
+    if (item) return item.exerciseId;
+  }
+  return null;
+}
+
+// The highlight stands in for hover, so the pointer arriving in the list ends
+// it: from there on the row under the cursor is the hovered one, and only one
+// row in the list is ever hovered. Dropped by hand rather than by re-rendering
+// - a render from a mouse handler would replace the row the pointer is over and
+// kill the animation it just started.
+function onLibraryPointerCross() {
+  if (hoverParked) return;
+  clearLinkedHighlight();
+}
+
+function clearLinkedHighlight() {
+  if (linkedExerciseId === null) return;
+  linkedExerciseId = null;
+  pendingCenter = false;
+  dropLinkedClasses();
+}
+
+function dropLinkedClasses() {
+  if (!root) return;
+  for (const node of root.querySelectorAll('.exercise-row--linked')) {
+    node.classList.remove('exercise-row--linked');
+  }
+}
+
+// Put the linked row as near the middle of the list as the list allows.
+// Measured, not computed from offsetTop - that is relative to whichever
+// ancestor happens to be positioned - and scrollTop clamps itself at both ends.
+function centerLinkedRow() {
+  if (!root || linkedExerciseId === null) return;
+
+  const list = root.querySelector('.exercise-list');
+  if (!list) return;
+  const row = list.querySelector('.exercise-row[data-id="' + linkedExerciseId + '"]');
+  if (!row) return;
+
+  const listBox = list.getBoundingClientRect();
+  const box = row.getBoundingClientRect();
+  list.scrollTop += box.top - listBox.top - (listBox.height - box.height) / 2;
 }
 
 // A left click on anything that is not a selectable block drops the selection -
@@ -276,6 +504,7 @@ function dropSelectionClasses() {
   for (const node of root.querySelectorAll('.complex--selected')) {
     node.classList.remove('complex--selected');
   }
+  dropLinkedClasses();
 }
 
 function onDocumentKeydown(event) {
@@ -308,11 +537,33 @@ function onDocumentKeydown(event) {
   // Ctrl+G groups the exercises selected in Exercise_list into a new complex.
   // event.code again: on a Russian layout the G key reports event.key === 'п'.
   if ((event.ctrlKey || event.metaKey) && event.code === 'KeyG') {
-    if (selection.scope !== 'library' || selection.ids.size === 0) return;
+    if (!groupLibrarySelection()) return;
     event.preventDefault();
+    return;
+  }
 
-    const category = activeCategory();
-    createComplexFromExercises(orderedSelection(), category.complexes.length);
+  // Enter does the same thing without a modifier, per the spec: everything
+  // selected in Exercise_list becomes ONE complex at the end of the list.
+  // Enter is layout-safe, so event.key is the right test - and the guards
+  // above have already let a field, or a category name being edited, keep it.
+  if (event.key === 'Enter') {
+    // On a focused button Enter means "press this button". A star click leaves
+    // the focus there without clearing the selection - it stops the click from
+    // reaching the document - so without this the key would both toggle the
+    // favourite again and group.
+    if (tag === 'BUTTON') return;
+    if (!groupLibrarySelection()) return;
+    event.preventDefault();
+    return;
+  }
+
+  // Up/Down walk the selection, Shift extends it as a range and Ctrl+Shift
+  // takes that range to the end of the list. They only act on a selection that
+  // already exists - there is no "current block" without one.
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    if (!selection.scope || selection.ids.size === 0) return;
+    event.preventDefault(); // and do not scroll the page instead
+    moveSelection(event.key === 'ArrowDown' ? 1 : -1, event);
     return;
   }
 
@@ -327,6 +578,19 @@ function onDocumentKeydown(event) {
     clearSelection();
     render();
   }
+}
+
+// Everything selected in Exercise_list, as one complex at the end of the list.
+// Returns false when there is nothing to group, so the caller can leave the key
+// alone rather than swallowing it.
+function groupLibrarySelection() {
+  if (selection.scope !== 'library' || selection.ids.size === 0) return false;
+
+  const category = activeCategory();
+  if (!category) return false;
+
+  createComplexFromExercises(orderedSelection(), category.complexes.length);
+  return true;
 }
 
 // --- row drag and drop -----------------------------------------------------
@@ -619,6 +883,13 @@ function render() {
   root.appendChild(el('div', { class: 'page' }, renderHeader(state), body));
 
   restoreScroll(scroll);
+
+  // A selection in Complex_list overrides the position Exercise_list was left
+  // at, so this goes after restoreScroll rather than instead of it.
+  if (pendingCenter) {
+    pendingCenter = false;
+    centerLinkedRow();
+  }
 
   // The header was rebuilt, so the undo slot came back empty.
   refreshUndoSlot();
@@ -1282,6 +1553,20 @@ function renderExerciseColumn(state, category) {
     if (event.target === list) onLibraryDrop(event);
   });
 
+  // The pointer reaching this list ends the borrowed highlight. Leaving counts
+  // too: it must not come back behind a pointer that has already been here.
+  //
+  // Both are ignored while hover is parked, and that is not an optimisation:
+  // every render replaces this node, and Chrome then fires mouseenter on the
+  // NEW one under a pointer that has not moved - so a keyboard move with the
+  // pointer resting over this list would throw the highlight away the instant
+  // it was set. While the park is on, nothing here counts as the pointer
+  // arriving anywhere. Once it is lifted the pointer is inside the list and no
+  // mouseenter will fire, so the highlight is left standing and it is CSS that
+  // hides it - see the note on .exercise-list:hover in the stylesheet.
+  list.addEventListener('mouseenter', onLibraryPointerCross);
+  list.addEventListener('mouseleave', onLibraryPointerCross);
+
   return el(
     'div',
     { class: 'column column--exercise' },
@@ -1311,6 +1596,9 @@ function renderAddButton(label) {
 function renderExerciseRow(state, exercise, context) {
   return renderRow(exercise, {
     selected: isSelected(context.scope, context.key),
+    // Only ever a library row: it is the block SELECTED in a complex that
+    // points at it.
+    linked: context.scope === 'library' && linkedExerciseId === context.key,
     showIndicators: state.ui.showIndicators,
     showFavorites: state.ui.showFavorites,
     onToggleFavorite: (target) => toggleFavorite(target.id),
