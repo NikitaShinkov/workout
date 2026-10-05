@@ -506,6 +506,36 @@ await new Promise((r) => setTimeout(r, 600));
 check('10: AND BACK RETURNS TO THE PAGE BEFORE IT', (await mounted()) === 'schedule',
   await mounted());
 
+// The token rides in the same fragment, and has to survive every page switch:
+// a phone's home-screen icon is made from whatever the URL says at that moment,
+// and an icon without it opened with no token and silently saved nothing.
+const hashNow = () => page.evaluate(() => location.hash);
+await page.goto(BASE + '/index.html?offline=1&a=3#workout&k=fake_token', { waitUntil: 'networkidle2' });
+await new Promise((r) => setTimeout(r, 500));
+check('10b: A LINK CARRYING THE TOKEN STILL OPENS ITS PAGE', (await mounted()) === 'workout',
+  await mounted());
+check('10b: AND THE TOKEN STAYS IN THE URL', (await hashNow()) === '#workout&k=fake_token',
+  await hashNow());
+
+await page.evaluate(() => [...document.querySelectorAll('.page-button')]
+  .find((b) => b.dataset.page === 'calendar').click());
+await new Promise((r) => setTimeout(r, 500));
+check('10b: SWITCHING PAGE KEEPS THE TOKEN', (await mounted()) === 'calendar'
+  && (await hashNow()) === '#calendar&k=fake_token', await hashNow());
+
+await page.goBack();
+await new Promise((r) => setTimeout(r, 600));
+check('10b: and back still walks the pages', (await mounted()) === 'workout', await mounted());
+
+// Opened later with no token in the URL: the stored one is put back into it,
+// so the page can be added to the home screen from there.
+await page.goto(BASE + '/index.html?offline=1&a=4#workout', { waitUntil: 'networkidle2' });
+await new Promise((r) => setTimeout(r, 500));
+check('10b: A STORED TOKEN IS WRITTEN BACK INTO THE URL',
+  (await hashNow()) === '#workout&k=fake_token', await hashNow());
+
+await page.evaluate(() => localStorage.removeItem('workout.token'));
+
 check('no page errors', errs.length === 0, errs.join(' | '));
 
 console.log(lines.join('\n'));

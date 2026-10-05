@@ -9,6 +9,7 @@ import { mountSchedulePage } from './schedule-page.js';
 import { mountCalendarPage } from './calendar-page.js';
 import { mountWorkoutPage } from './workout-page.js';
 import { mountExercisePage, hasExerciseSession } from './exercise-page.js';
+import { hashSuffix } from './sync.js';
 
 const PAGES = {
   schedule: mountSchedulePage,
@@ -48,8 +49,9 @@ export function goToPage(page) {
   destroyCurrent = PAGES[page](root, goToPage);
 
   // So the address bar always names the page on screen, and the phone's back
-  // button walks back through the pages that were visited.
-  if (pageFromHash() !== page) window.location.hash = page;
+  // button walks back through the pages that were visited. The suffix is the
+  // token (`&k=…`), which must ride along on every page - see initToken().
+  if (pageFromHash() !== page) window.location.hash = page + hashSuffix();
 }
 
 export function currentPage() {
@@ -57,7 +59,7 @@ export function currentPage() {
 }
 
 function pageFromHash() {
-  const name = String(window.location.hash || '').replace(/^#/, '');
+  const name = String(window.location.hash || '').replace(/^#/, '').split('&')[0];
   if (!PAGES[name]) return null;
   if (NEEDS_SESSION[name] && !NEEDS_SESSION[name]()) return null;
   return name;

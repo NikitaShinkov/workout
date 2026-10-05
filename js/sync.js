@@ -43,12 +43,18 @@ const EMPTY_LOG = { version: 1, ops: [] };
 // --- the token ---------------------------------------------------------------
 
 // It arrives in the bookmark's fragment (`#workout&k=…`), which is never sent
-// to any server, and is then taken straight out of the address bar so a
-// screenshot or a shared link cannot leak it. The home-screen bookmark still
-// carries it, so this heals itself if the browser ever clears storage.
+// to any server, and it STAYS there - app.js carries it across every page
+// switch. It used to be stripped from the address bar on arrival, and that is
+// what lost weeks of the phone's workouts: a bookmark or a home-screen icon is
+// made from the URL as it is when the user taps Share, which was by then the
+// stripped one. And a home-screen web app on iOS keeps storage of its own,
+// apart from Safari's, so the icon opened with no token at all - every rating
+// was buffered, shown on the phone, and never sent, without a word.
 //
-// MUST run before mountApp: pageFromHash() reads the whole fragment as a page
-// name, so `#workout&k=…` matches nothing and goToPage would overwrite it.
+// So the fragment is the token's home, and storage only backs it up: a token
+// found in storage is written back INTO the fragment, which means opening the
+// site once anywhere the token is known yields a URL any icon made from it can
+// carry.
 export function initToken() {
   const raw = String(window.location.hash || '').replace(/^#/, '');
   const parts = raw.split('&');
@@ -62,19 +68,32 @@ export function initToken() {
 
   if (token) {
     local(() => localStorage.setItem(TOKEN_KEY, token));
-    const clean = window.location.pathname + window.location.search + (page ? '#' + page : '');
-    window.history.replaceState(null, '', clean);
   } else {
     token = local(() => localStorage.getItem(TOKEN_KEY)) || null;
+    if (token) {
+      const hash = '#' + (page || '') + '&k=' + encodeURIComponent(token);
+      window.history.replaceState(null, '', window.location.pathname + window.location.search + hash);
+    }
   }
 
   setToken(token);
   return Boolean(token);
 }
 
+// What follows the page name in the fragment - `&k=…` - so that app.js can
+// write a new page name without dropping the token. Empty when there is none.
+export function hashSuffix() {
+  const raw = String(window.location.hash || '').replace(/^#/, '');
+  const amp = raw.indexOf('&');
+  return amp === -1 ? '' : raw.slice(amp);
+}
+
 export function forgetToken() {
   local(() => localStorage.removeItem(TOKEN_KEY));
   setToken(null);
+  const page = String(window.location.hash || '').replace(/^#/, '').split('&')[0];
+  window.history.replaceState(null, '', window.location.pathname + window.location.search
+    + (page ? '#' + page : ''));
 }
 
 export { hasToken };

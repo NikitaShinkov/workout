@@ -45,7 +45,8 @@ http://localhost:8080/index.html#schedule&k=github_pat_…      the computer
 https://nikitashinkov.github.io/workout/#workout&k=…          the phone
 ```
 
-It is then kept in localStorage and stripped from the address bar. **Never commit
+It is then kept in localStorage **and stays in the fragment** on every page (see
+"The token" below for why it is no longer stripped). **Never commit
 a token** — GitHub revokes any it finds in a public repo, so the leak costs the
 token too. `.gitignore` has a `*token*` backstop because the user keeps theirs in
 a text file inside the project folder and `git add -A` once staged it.
@@ -173,8 +174,17 @@ device writing back the pruning `normalizeComplexes()` does on every load.
 sent to a server. `initToken()` must run **before `mountApp()`**:
 `pageFromHash()` reads the whole fragment as a page name, so `#workout&k=…`
 matches nothing and `goToPage()` would then overwrite the hash and destroy it.
-It is copied to localStorage and stripped from the address bar; the home-screen
-bookmark still carries it, so it heals itself if storage is ever cleared.
+It is copied to localStorage and **left in the fragment**: `goToPage()` carries
+the `&k=…` suffix (`hashSuffix()`) across every page switch, and a token found
+only in storage is written back into the URL.
+**It used to be stripped, and that lost weeks of the phone's workouts.** A
+bookmark or home-screen icon is made from the URL as it stands when Share is
+tapped — by then the stripped one — and on iOS a home-screen web app has storage
+of its own, apart from Safari's. So the icon opened with no token, `flush()`
+returned early, and every rating sat in the phone's buffer, shown on the phone
+and never sent, with nothing to say so. The log has no ops at all between
+2026-09-07 and 2026-10-04. `jsdom/sync` section 8 and `browser/workout-layout`
+section 10b pin the token staying put.
 Reads need no token (60/hour per address); writes do (5000/hour).
 
 `?offline=1` skips the network entirely — that is how the browser suites drive

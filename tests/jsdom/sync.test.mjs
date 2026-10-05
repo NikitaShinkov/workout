@@ -534,18 +534,40 @@ check('8: THE TOKEN IS READ OUT OF THE BOOKMARK FRAGMENT', found === true, found
 check('8: and kept, so a reload still works',
   localStorage.getItem('workout.token') === 'github_pat_SECRET',
   localStorage.getItem('workout.token'));
-check('8: IT IS STRIPPED FROM THE URL so a screenshot cannot leak it',
-  !dom.window.location.href.includes('SECRET'), dom.window.location.href);
-check('8: AND THE PAGE SURVIVES - the fragment still names the workout page',
-  dom.window.location.hash === '#workout', dom.window.location.hash);
+// Stripping it is what lost weeks of the phone's ratings: a home-screen icon is
+// made from the URL as it stands when Share is tapped, and on iOS that icon has
+// storage of its own - so it opened with no token and saved nothing, silently.
+check('8: THE TOKEN STAYS IN THE URL, so an icon made from this page carries it',
+  dom.window.location.hash === '#workout&k=github_pat_SECRET', dom.window.location.hash);
+check('8: the suffix app.js keeps across page switches is the token',
+  sync.hashSuffix() === '&k=github_pat_SECRET', sync.hashSuffix());
 
 dom.window.history.replaceState(null, '', '/#calendar');
 check('8: with no token in the URL the stored one is used',
-  sync.initToken() === true && dom.window.location.hash === '#calendar',
-  dom.window.location.hash);
+  sync.initToken() === true, dom.window.location.hash);
+check('8: AND IS WRITTEN BACK INTO THE URL, so the page can be added to the home screen',
+  dom.window.location.hash === '#calendar&k=github_pat_SECRET', dom.window.location.hash);
 
+// The case that actually happened: an icon opened in storage that has never
+// seen the token, from a URL that carries it.
+localStorage.removeItem('workout.token');
+dom.window.history.replaceState(null, '', '/#workout&k=github_pat_SECRET');
+check('8: A FRESH STORAGE OPENED FROM THE ICON CAN WRITE', sync.initToken() === true
+  && sync.hasToken(), dom.window.location.hash);
+
+localStorage.removeItem('workout.token');
+dom.window.history.replaceState(null, '', '/#workout');
+check('8: with no token anywhere the session is read-only and the URL is untouched',
+  sync.initToken() === false && dom.window.location.hash === '#workout',
+  dom.window.location.hash);
+check('8: and there is no suffix to carry', sync.hashSuffix() === '', sync.hashSuffix());
+
+dom.window.history.replaceState(null, '', '/#workout&k=github_pat_SECRET');
+sync.initToken();
 sync.forgetToken();
 check('8: and it can be forgotten', localStorage.getItem('workout.token') === null);
+check('8: forgetting takes it out of the URL as well',
+  dom.window.location.hash === '#workout', dom.window.location.hash);
 
 // ---------- report ----------
 
