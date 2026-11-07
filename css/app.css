@@ -787,6 +787,47 @@ body:not(.hover-off) .complex .exercise-row:hover,
   border-bottom: 9px solid transparent;
 }
 
+/* The Date_pointer is picked up anywhere along a 20px band centred on the 2px
+   rule (js/date-pointer.js) - the full width of the list, so it is no harder to
+   hit than the blocks either side of it. The band sits in the pointer's own
+   stacking layer (z-index 2), above the complexes, so inside it a press always
+   means the pointer; a complex is dragged from outside it.
+   The rule itself stays `pointer-events: none`; the band is the only part that
+   is hit-testable, and it steps aside during a row or complex drag (below). */
+.date-pointer__handle {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -9px;
+  height: 20px;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+/* While a row or a complex is being dragged (HTML5 DnD) the band must not be
+   the dragover target: the list would read "no row under the cursor" there
+   and turn a drop into a complex into a new complex. */
+body.dnd-active .date-pointer__handle {
+  pointer-events: none;
+}
+
+.date-pointer--movable .date-pointer__handle {
+  display: block;
+}
+
+/* Lifted above everything else in the list while it travels. */
+.date-pointer--dragging {
+  z-index: 3;
+}
+
+body.date-pointer-drag,
+body.date-pointer-drag * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+
 /* 66px keeps the design's row pitch (previously 58px + an 8px gap) while the
    taller padding leaves the 50px image intact, so the hover fill now covers the
    whole pitch instead of leaving a stripe between rows. */

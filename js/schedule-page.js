@@ -31,7 +31,14 @@ import {
   reorderComplexes,
   setComplexEnabled,
 } from './store.js';
-import { buildSchedule, formatDate, pointerIndex, startOfDay } from './schedule.js';
+import {
+  buildSchedule,
+  formatDate,
+  pointerIndex,
+  startOfDay,
+  startDateForPointer,
+} from './schedule.js';
+import { renderDatePointer, cancelDatePointerDrag } from './date-pointer.js';
 import { createDateInput, createIntervalInput } from './toolbar-inputs.js';
 import { renderPageSelector } from './page-selector.js';
 import { categoryButtonContents, categoryButtonClass } from './category-button.js';
@@ -169,6 +176,7 @@ export function mountSchedulePage(container, navigate) {
 
     stopAllRowAnimations();
     stopAutoScroll();
+    cancelDatePointerDrag();
     endDrag();
     // Leaving commits the pending deletions: there is no undo button to press
     // on the page being navigated to.
@@ -1431,11 +1439,13 @@ function renderComplexList(state, category, schedule) {
   let flatItem = 0;
 
   visible.forEach((complex, index) => {
-    if (index === pointerAt) children.push(renderDatePointer());
+    if (index === pointerAt) children.push(renderDatePointer({ onDrop: onDatePointerDrop }));
     children.push(renderComplex(state, category, complex, index, schedule.dates.get(complex.id), flatItem));
     flatItem += visibleItems(state, category, complex).length;
   });
-  if (pointerAt >= visible.length && visible.length) children.push(renderDatePointer());
+  if (pointerAt >= visible.length && visible.length) {
+    children.push(renderDatePointer({ onDrop: onDatePointerDrop }));
+  }
 
   const list = el('div', { class: 'complex-list' }, children);
   list.addEventListener('dragover', onComplexListDragOver);
@@ -1443,11 +1453,16 @@ function renderComplexList(state, category, schedule) {
   return list;
 }
 
-// A rule across the list marking today. Sticky at both edges, so scrolling past
-// it in either direction parks it against the near edge of the list instead of
-// letting it disappear.
-function renderDatePointer() {
-  return el('div', { class: 'date-pointer' }, el('span', { class: 'date-pointer__icon' }));
+// The Date_pointer dropped on a boundary between complexes (an index among the
+// complexes on screen): the complex after it becomes today's. That is just
+// another way of setting the start date, so it goes through the same field the
+// toolbar's date input writes and the schedule recomputes from it as usual.
+function onDatePointerDrop(boundary) {
+  const category = activeCategory();
+  if (!category) return;
+
+  const start = startDateForPointer(category, fullComplexIndex(boundary));
+  if (start !== category.scheduleStartDate) setCategoryField('scheduleStartDate', start);
 }
 
 function renderComplex(state, category, complex, index, date, firstItemIndex) {

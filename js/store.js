@@ -607,3 +607,15 @@ export function setCategoryField(field, value) {
     if (category) category[field] = value;
   });
 }
+
+// { categoryId: isoDate } - the calendar's Date_pointer moves every category at
+// once, and that is one mutation, so one render and one write.
+export function setScheduleStartDates(byCategory) {
+  const ids = Object.keys(byCategory || {});
+  if (ids.length === 0) return;
+  update((draft) => {
+    for (const id of ids) {
+      if (draft.categories[id]) draft.categories[id].scheduleStartDate = byCategory[id];
+    }
+  });
+}

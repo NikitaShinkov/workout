@@ -1,9 +1,10 @@
 // Calendar page: every scheduled complex from every category, laid out by the
 // day it falls on.
 //
-// A read view. The order is the schedule's, so nothing here drags, nothing is
+// A read view. The order is the schedule's, so no block drags, nothing is
 // selected and Del does nothing - the only interactions are switching which
-// category a day shows, starring a block, and opening one to edit it.
+// category a day shows, starring a block, opening one to edit it, and dragging
+// the Date_pointer, which moves every category's start date at once.
 
 import { el, clear } from './dom.js';
 import { openExerciseModal } from './exercise-modal.js';
@@ -15,8 +16,17 @@ import {
   setUiFlag,
   setActiveCategory,
   addCategory,
+  setScheduleStartDates,
 } from './store.js';
-import { buildCalendar, formatDate, pointerIndex, startOfDay } from './schedule.js';
+import {
+  addDays,
+  buildCalendar,
+  formatDate,
+  pointerIndex,
+  startOfDay,
+  startDatesForCalendarPointer,
+} from './schedule.js';
+import { renderDatePointer, cancelDatePointerDrag } from './date-pointer.js';
 import { renderPageSelector } from './page-selector.js';
 import { editCategoryOnOpen } from './schedule-page.js';
 import { categoryButtonContents, categoryButtonClass } from './category-button.js';
@@ -42,6 +52,7 @@ export function mountCalendarPage(container, navigate) {
 
   return function destroy() {
     unsubscribe();
+    cancelDatePointerDrag();
     stopAllRowAnimations();
     clear(root);
     root = null;
@@ -198,18 +209,27 @@ function renderDayList(state, days) {
     ? pointerIndex(days.map((day) => ({ id: day.key })), dates, startOfDay())
     : -1;
 
+  const onDrop = (boundary) => onDatePointerDrop(days, boundary);
   const children = [];
   days.forEach((day, index) => {
-    if (index === pointerAt) children.push(renderDatePointer());
+    if (index === pointerAt) children.push(renderDatePointer({ onDrop }));
     children.push(renderDay(state, day));
   });
-  if (days.length && pointerAt >= days.length) children.push(renderDatePointer());
+  if (days.length && pointerAt >= days.length) children.push(renderDatePointer({ onDrop }));
 
   return el('div', { class: 'complex-list complex-list--calendar' }, children);
 }
 
-function renderDatePointer() {
-  return el('div', { class: 'date-pointer' }, el('span', { class: 'date-pointer__icon' }));
+// The Date_pointer dropped before day `boundary`: that day becomes today. The
+// calendar is every category at once, so every category's start date moves by
+// the same number of days - the calendar keeps its shape and slides under the
+// pointer. Below the last day means the day after it is today.
+function onDatePointerDrop(days, boundary) {
+  if (!days.length) return;
+  const day = boundary < days.length
+    ? days[boundary].date
+    : addDays(days[days.length - 1].date, 1);
+  setScheduleStartDates(startDatesForCalendarPointer(getState(), day));
 }
 
 function renderDay(state, day) {

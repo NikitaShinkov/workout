@@ -151,15 +151,112 @@ export function skipWeekend(date) {
   return next;
 }
 
+// A date that falls on Saturday or Sunday -> the Friday before it.
+function skipWeekendBack(date) {
+  let previous = date;
+  while (isWeekend(previous)) previous = addDays(previous, -1);
+  return previous;
+}
+
 // With weekends left out the interval counts WORKING days, so an interval of
 // 1 runs Mon..Fri and then Mon, and an interval of 2 runs Mon, Wed, Fri, Tue.
+// A negative count walks backwards.
 export function addWorkingDays(date, days) {
+  const step = days < 0 ? -1 : 1;
   let next = date;
-  for (let left = days; left > 0; ) {
-    next = addDays(next, 1);
+  for (let left = Math.abs(days); left > 0; ) {
+    next = addDays(next, step);
     if (!isWeekend(next)) left -= 1;
   }
   return next;
+}
+
+// Whole days from `from` to `to`, by the calendar rather than by milliseconds,
+// so a DST change in between cannot make it 0.96 of a day.
+export function daysBetween(from, to) {
+  const a = Date.UTC(from.getFullYear(), from.getMonth(), from.getDate());
+  const b = Date.UTC(to.getFullYear(), to.getMonth(), to.getDate());
+  return Math.round((b - a) / 86400000);
+}
+
+// --- moving the schedule by dragging the Date_pointer -----------------------
+//
+// Both pages answer the same question: "which start date makes slot N land on
+// <target>?" Slot N is the N-th ENABLED complex, counted from zero - and N may
+// be one past the last, which is where the pointer sits when every complex is
+// in the past.
+
+// The date slot N falls on under the category's current settings, whether or
+// not a complex occupies it.
+export function slotDate(category, slot, now = new Date()) {
+  const { start, interval, includeWeekends } = buildSchedule({ ...category, complexes: [] }, now);
+  return includeWeekends
+    ? addDays(start, slot * interval)
+    : addWorkingDays(skipWeekend(start), slot * interval);
+}
+
+// The start date that puts slot N on `target` - or, with weekends left out and
+// `target` on one, on the Monday after it: the first day the schedule can use.
+export function startForSlot(category, slot, target) {
+  const interval = parseInterval(category.intervalDays);
+  if (category.includeWeekends === true) return addDays(target, -slot * interval);
+  return addWorkingDays(skipWeekend(target), -slot * interval);
+}
+
+// How many ENABLED complexes come before `fullIndex` in the category's list -
+// i.e. which slot the complex at that position (or the next enabled one after
+// it) occupies.
+export function slotBefore(category, fullIndex) {
+  return (category.complexes || []).slice(0, fullIndex).filter((c) => c.enabled).length;
+}
+
+// Schedule page: the pointer dropped before the complex at `fullIndex` -> the
+// start date that makes that complex today's.
+export function startDateForPointer(category, fullIndex, now = new Date()) {
+  return toIsoDate(startForSlot(category, slotBefore(category, fullIndex), startOfDay(now)));
+}
+
+// Calendar page: the pointer dropped before the day `boundary` (the first day
+// that should now read as today). Every category moves by the same number of
+// days, so the calendar keeps its shape and that day lands on today. A
+// category that leaves weekends out moves its next complex to the first
+// weekday on or after where the shift puts it.
+// Returns { categoryId: isoStartDate } for every category whose start changes.
+export function startDatesForCalendarPointer(state, boundary, now = new Date()) {
+  const today = startOfDay(now);
+  const delta = daysBetween(boundary, today);
+  const out = {};
+
+  for (const id of state.categoryOrder) {
+    const category = state.categories[id];
+    if (!category) continue;
+
+    const { dates } = buildSchedule(category, now);
+    let slot = 0;
+    for (const complex of category.complexes || []) {
+      const date = dates.get(complex.id);
+      if (date && date < boundary) slot += 1;
+    }
+
+    let target = addDays(slotDate(category, slot, now), delta);
+    if (category.includeWeekends !== true) {
+      // Shifting by calendar days changes which weekday a date falls on, and
+      // a schedule counted in working days then re-spaces around it - enough,
+      // sometimes, to pull the complex BEFORE the boundary onto today. Keep
+      // the boundary true: the next complex no later than the first weekday
+      // the previous one can still be in the past for.
+      target = skipWeekend(target);
+      if (slot > 0) {
+        const lastPast = skipWeekendBack(addDays(today, -1));
+        const latest = addWorkingDays(lastPast, parseInterval(category.intervalDays));
+        if (target > latest) target = latest;
+      }
+    }
+    const iso = toIsoDate(startForSlot(category, slot, target));
+    if (iso !== category.scheduleStartDate) out[id] = iso;
+  }
+
+  return out;
 }
 
 // --- the calendar -----------------------------------------------------------

@@ -75,6 +75,7 @@ js/calendar-page.js   page 2 - every category's schedule, by day. Read-only
 js/workout-page.js    page 3 - today / tomorrow / the day after, for a phone
 js/exercise-page.js   page 4 - one exercise being performed. Writes the results
 js/gesture.js         the numbers behind every horizontal swipe, shared
+js/date-pointer.js    the Date_pointer and its drag, shared by schedule and calendar
 js/page-selector.js   the header's page switcher, shared by all three pages
 js/category-button.js the insides of a category button - ditto, see gotcha 16
 js/exercise-row.js    Exercise_block itself, shared by the first two pages
@@ -518,7 +519,8 @@ is active, and the selector reads as "somewhere else you can go".
 
 - **schedule** (`js/schedule-page.js`) — the default, and where the app always
   opens; the page is deliberately not persisted.
-- **calendar** (`js/calendar-page.js`) — read-only. `buildCalendar()` in
+- **calendar** (`js/calendar-page.js`) — read-only, apart from dragging the
+  Date_pointer. `buildCalendar()` in
   `js/schedule.js` gathers every scheduled complex from every category by the
   day it falls on. A day's first row is Category_block, tabs for the categories
   landing on that day; which tab is open is transient, per day.
@@ -634,6 +636,23 @@ else.
   `buildSchedule()` owns it, so the calendar and the workout page follow.
   The test harness turns weekends ON for every category unless
   `&weekends=off`, because the suites count dates in calendar days.
+- **The Date_pointer can be dragged** (`js/date-pointer.js`),
+  on the schedule page and on the calendar. Dropped on a boundary, the block
+  after it becomes today's — it is another way of setting the start date, so
+  the schedule page writes `scheduleStartDate` exactly as the date field does
+  (`startDateForPointer()`), and below the last block means the last one was
+  yesterday. The **calendar moves every category by the same number of days**
+  (`startDatesForCalendarPointer()`, one `setScheduleStartDates()` mutation),
+  so it keeps its shape and slides under the pointer; a category that skips
+  weekends is clamped so nothing from before the boundary lands on today.
+  **Pointer events, not HTML5 DnD**: the lists already speak DnD for rows and
+  complexes, and capture keeps `:hover` off the rows it crosses. The rule
+  stays `pointer-events: none`; the grab area is `.date-pointer__handle`, a
+  **20px band across the whole list** centred on the rule and stacked above
+  the complexes, so inside it a press always means the pointer and a complex
+  is dragged from outside it. During a row or complex drag `body.dnd-active`
+  takes the band out of hit-testing, or it would hide the row under it. Escape
+  cancels; a click is not a drag. `browser/date-pointer` drives it.
 - `scheduleStartDate` defaults to `3 сен` (chosen so the Date_pointer lands
   mid-list) with an interval of 1.
 - **The two toolbar fields are keyboard machines, not text boxes**
@@ -848,7 +867,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 26 suites, ~1150 checks, ~155s
+npm test             all 27 suites, ~1150 checks, ~155s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -881,7 +900,8 @@ covers behaviour that is easy to break silently.
   page — top_block floating
   over the picture, the description sizing itself to its text, the Toolbar,
   Button_next and its ring, the swipe onto the sheet and how the sheet divides
-  the block — `loading` the loading screen and its turn, `toolbar` the two
+  the block — `loading` the loading screen and its turn, `date-pointer` dragging the
+  Date_pointer on both pages, its 20px grab band and what it does to the dates, `toolbar` the two
   masked fields plus the category switch and the favourites filter,
   `complex-drag` / `complex-layout` the schedule page's lists, `drag` /
   `category-layout` / `hover-undo` the category menu, `row-layout` / `text` /

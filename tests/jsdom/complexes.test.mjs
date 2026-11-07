@@ -476,6 +476,80 @@ const endOf = (c) => fmt(buildSchedule(c).end);
 check('11: the end date is the last complex\'s, weekends skipped',
   endOf(weekCat({}, 3)) === '7 сен', endOf(weekCat({}, 3)));
 
+// ---------- 12. the Date_pointer's arithmetic ----------
+//
+// Dropping the pointer before complex N must make complex N today's. Fixed
+// "now"s: 2026-11-10 is a Tuesday, 2026-11-07 a Saturday.
+
+const { startDateForPointer, startDatesForCalendarPointer } = await mod('schedule.js');
+const TUE = new Date(2026, 10, 10);
+const SAT = new Date(2026, 10, 7);
+const at = (category, now) => {
+  const { dates } = buildSchedule(category, now);
+  return category.complexes.map((c) => (dates.get(c.id) ? fmt(dates.get(c.id)) : '—')).join(',');
+};
+const moved = (fields, count, index, now) => {
+  const category = weekCat(fields, count);
+  category.scheduleStartDate = startDateForPointer(category, index, now);
+  return at(category, now);
+};
+
+check('12: before the first complex -> it is today',
+  moved({ includeWeekends: true }, 4, 0, TUE) === '10 ноя,11 ноя,12 ноя,13 ноя',
+  moved({ includeWeekends: true }, 4, 0, TUE));
+check('12: before the third -> the third is today, the two above are past',
+  moved({ includeWeekends: true }, 4, 2, TUE) === '8 ноя,9 ноя,10 ноя,11 ноя',
+  moved({ includeWeekends: true }, 4, 2, TUE));
+check('12: below the last -> every complex is in the past, the last yesterday',
+  moved({ includeWeekends: true }, 4, 4, TUE) === '6 ноя,7 ноя,8 ноя,9 ноя',
+  moved({ includeWeekends: true }, 4, 4, TUE));
+check('12: the interval is kept',
+  moved({ includeWeekends: true, intervalDays: 3 }, 3, 1, TUE) === '7 ноя,10 ноя,13 ноя',
+  moved({ includeWeekends: true, intervalDays: 3 }, 3, 1, TUE));
+check('12: without weekends, the count back is in working days',
+  moved({}, 4, 2, TUE) === '6 ноя,9 ноя,10 ноя,11 ноя', moved({}, 4, 2, TUE));
+check('12: on a Saturday without weekends, it is Monday\'s complex',
+  moved({}, 3, 1, SAT) === '6 ноя,9 ноя,10 ноя', moved({}, 3, 1, SAT));
+
+// A disabled complex has no slot: before it means before the next enabled one.
+const withOff = weekCat({ includeWeekends: true }, 4);
+withOff.complexes[1].enabled = false;
+withOff.scheduleStartDate = startDateForPointer(withOff, 1, TUE);
+check('12: a disabled complex takes no slot',
+  at(withOff, TUE) === '9 ноя,—,10 ноя,11 ноя', at(withOff, TUE));
+
+// The calendar moves every category by the same number of days.
+const calState = {
+  categoryOrder: ['a', 'b'],
+  categories: {
+    a: weekCat({ includeWeekends: true }, 4),                               // 3,4,5,6 сен
+    b: weekCat({ includeWeekends: true, intervalDays: 2, scheduleStartDate: '2026-09-04' }, 2), // 4,6 сен
+  },
+};
+const calMoves = startDatesForCalendarPointer(calState, new Date(2026, 8, 4), TUE);
+for (const id of Object.keys(calMoves)) calState.categories[id].scheduleStartDate = calMoves[id];
+check('12: calendar - the day after the boundary is today in every category',
+  at(calState.categories.a, TUE) === '9 ноя,10 ноя,11 ноя,12 ноя'
+    && at(calState.categories.b, TUE) === '10 ноя,12 ноя',
+  at(calState.categories.a, TUE) + ' | ' + at(calState.categories.b, TUE));
+check('12: calendar - an unmoved category is not rewritten',
+  Object.keys(startDatesForCalendarPointer(calState, new Date(2026, 10, 10), TUE)).length === 0);
+
+// Weekends left out: shifting by calendar days re-spaces a working-day
+// schedule, which must not drag a complex from before the boundary onto today.
+const mixed = {
+  categoryOrder: ['a', 'b'],
+  categories: {
+    a: weekCat({ includeWeekends: true }, 5),          // 3..7 сен
+    b: weekCat({ intervalDays: 2 }, 4),                // 3, 7, 9, 11 сен
+  },
+};
+const mixedMoves = startDatesForCalendarPointer(mixed, new Date(2026, 8, 5), TUE);
+for (const id of Object.keys(mixedMoves)) mixed.categories[id].scheduleStartDate = mixedMoves[id];
+const firstB = buildSchedule(mixed.categories.b, TUE).dates.get('w0');
+check('12: calendar - a past complex stays in the past without weekends',
+  firstB < new Date(2026, 10, 10), at(mixed.categories.b, TUE));
+
 // ---------- report ----------
 
 check('no console errors', errors.length === 0, errors.join(' | '));
