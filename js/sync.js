@@ -26,7 +26,7 @@
 //               written in the meantime.
 
 import { STATE_PATH, LOG_PATH, IMAGE_DIR } from './config.js';
-import { readJson, commitFiles, setToken, hasToken } from './github.js';
+import { readJson, readFile, commitFiles, setToken, hasToken } from './github.js';
 import { hashImage, blobBytes } from './images.js';
 import { uid } from './model.js';
 
@@ -120,6 +120,19 @@ const hashes = new WeakMap();
 // writing back the pruning that migrate() does on every load.
 let baseline = null;
 
+// Where the state on screen came from, which decides whether it may ever be
+// written over state.json:
+//   'repo'  - state.json was read (or the cached copy of a read). Safe.
+//   'empty' - the repo answered that it has no state.json: a fresh install.
+//             Re-checked at write time before the first write.
+//   null    - nothing was read at all: `?offline=1`, a load that never ran,
+//             or no signal and no cache. NEVER written.
+// The null case is the one that wiped the real data on 2026-11-07: `?offline=1`
+// skipped the load, the app showed the empty default state, and a device that
+// held a token wrote that empty state over every exercise the user had. The
+// baseline was null, so ANY mutation counted as a change.
+let loadedFrom = null;
+
 // `?offline=1` skips the network entirely, which is how the browser suites
 // drive the real index.html for layout and routing without depending on a
 // repository, a token, or a connection.
@@ -129,6 +142,7 @@ function offline() {
 
 export async function loadFromRepo() {
   let fetched = null;
+  loadedFrom = null;
   if (offline()) return null;
 
   try {
@@ -139,7 +153,10 @@ export async function loadFromRepo() {
     // No state.json at all is not a failure - it is a data repo nobody has
     // written to yet, which means a fresh install.
     if (state) fetched = { state, log: log || EMPTY_LOG };
-    else return null;
+    else {
+      loadedFrom = 'empty';
+      return null;
+    }
 
     local(() => localStorage.setItem(CACHE_KEY, JSON.stringify(fetched)));
   } catch (error) {
@@ -163,6 +180,7 @@ export async function loadFromRepo() {
   applyOps(merged, { ops: bufferRead() });
 
   baseline = serializeText(merged);
+  loadedFrom = 'repo';
   return merged;
 }
 
@@ -404,8 +422,10 @@ export async function flush() {
     clearTimeout(idleTimer);
     idleTimer = null;
   }
-  // Without a token this is a read-only session; the buffer simply waits.
-  if (!hasToken() || running) return;
+  // Without a token this is a read-only session; the buffer simply waits. And
+  // `?offline=1` never writes, token or not - it loaded nothing, so it has
+  // nothing it could safely say about the repo.
+  if (!hasToken() || running || offline()) return;
 
   running = true;
   try {
@@ -488,16 +508,31 @@ function compact(ops) {
 async function flushStructure() {
   if (!latestState) return;
 
+  // A state that was never read from the repo is never written to it - see
+  // `loadedFrom`. That is the empty default the app falls back on, and
+  // writing it would replace everything the repo holds.
+  if (loadedFrom === null) return;
+
   // Nothing structural has changed - a view toggle, or the pruning migrate()
   // does on load. Neither is worth a commit, and the second must never be
   // written back from a device that only came here to read.
   if (serializeText(latestState) === baseline) return;
+
+  // "The repo has no state.json" was true when we loaded; make sure it still
+  // is before the first write. A file that failed to parse also reads as
+  // absent, and another device may have written meanwhile.
+  if (loadedFrom === 'empty' && (await readFile(STATE_PATH)) !== null) {
+    loadedFrom = null;
+    console.warn('state.json appeared in the data repo after this page loaded; not overwriting it.');
+    return;
+  }
 
   const { out, files } = await serializeForRepo(latestState);
   const text = JSON.stringify(out, null, 2);
 
   files.push({ path: STATE_PATH, text });
   await commitFiles(files, 'Update schedule');
+  loadedFrom = 'repo';
 
   for (const file of files) {
     if (file.bytes) committedImages.add(file.path);
@@ -523,6 +558,7 @@ export function resetSync() {
   running = false;
   latestState = null;
   baseline = null;
+  loadedFrom = null;
   committedImages.clear();
   bufferWrite([]);
 }

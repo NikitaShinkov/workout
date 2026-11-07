@@ -55,7 +55,11 @@ Without a token everything still loads and renders; only saving is inert, which
 is the right default for a session that is only reading.
 
 **Care when testing by hand:** a write goes to the user's real data. `?offline=1`
-skips the network entirely, and the test harness never touches it at all.
+skips the network entirely — it reads nothing and, since the fix below, writes
+nothing — and the test harness never touches it at all. **`?offline=1` shows
+the EMPTY default state, not a cached copy**; never describe it to the user as
+"your data without saving". Telling them exactly that is how their data was
+wiped on 2026-11-07 (see "A state that was never loaded is never written").
 
 ## File map
 
@@ -170,6 +174,20 @@ launch. The close event stops mattering.
 `baseline` — the serialization of the state as loaded — and compares against it.
 That is what stops a view toggle committing, and, more importantly, what stops a
 device writing back the pruning `normalizeComplexes()` does on every load.
+
+**A state that was never loaded is never written.** On 2026-11-07 the user's
+whole `state.json` — every exercise and complex in eight categories — was
+replaced by the empty default. `?offline=1` had made `loadFromRepo()` return
+null, `migrate(null)` put up the seven default categories, `flush()` did not
+check for offline mode, and with `baseline` null *any* mutation differed from
+it, so the first click committed the empty state. (Recovered by checking out
+`data/state.json` from `616c3274` in the data repo; `log.json` and the images
+were never touched.) `sync.js` now tracks `loadedFrom`: `'repo'` (read, or
+the cached copy of a read), `'empty'` (the repo answered "no state.json" — a
+fresh install, re-checked with a second read right before the first write), or
+`null` — nothing read — which is **never** written. `flush()` also returns
+early under `?offline=1`. `jsdom/sync` section 9 replays the wipe, and fails
+three checks against the old code.
 
 **The token** rides in the bookmark's fragment (`#workout&k=…`), which is never
 sent to a server. `initToken()` must run **before `mountApp()`**:

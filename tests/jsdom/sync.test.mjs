@@ -569,6 +569,70 @@ check('8: and it can be forgotten', localStorage.getItem('workout.token') === nu
 check('8: forgetting takes it out of the URL as well',
   dom.window.location.hash === '#workout', dom.window.location.hash);
 
+// ---------- 9. a state that was never loaded is never written ----------
+//
+// What wiped the real data on 2026-11-07: `?offline=1` loads nothing, the app
+// falls back on the empty default state, and a device holding a token wrote
+// that over state.json on its first click.
+
+const { migrate } = await mod('store.js');
+const REAL = JSON.stringify(bareState());
+const emptyDefault = () => migrate(null);
+
+github.setToken('test-token');
+
+// 9a. offline mode, token present: nothing goes out at all.
+sync.resetSync();
+repo.files[STATE_PATH] = REAL;
+repo.requests = [];
+dom.window.history.replaceState(null, '', '/?offline=1#schedule');
+check('9: ?offline=1 loads nothing', (await sync.loadFromRepo()) === null);
+sync.noteState(emptyDefault());
+await sync.flush();
+check('9: ?OFFLINE=1 WITH A TOKEN NEVER WRITES',
+  repo.files[STATE_PATH] === REAL && !repo.requests.some((r) => !r.startsWith('GET')),
+  JSON.stringify(repo.requests));
+dom.window.history.replaceState(null, '', '/#schedule');
+
+// 9b. online, but no load ever ran: the state on screen is the default.
+sync.resetSync();
+repo.requests = [];
+sync.noteState(emptyDefault());
+await sync.flush();
+check('9: A STATE THAT WAS NEVER LOADED IS NEVER WRITTEN',
+  repo.files[STATE_PATH] === REAL && !repo.requests.some((r) => !r.startsWith('GET')),
+  JSON.stringify(repo.requests));
+
+// 9c. the load found no state.json, but one is there by the time we write.
+sync.resetSync();
+delete repo.files[STATE_PATH];
+check('9: an empty repo loads as a fresh install', (await sync.loadFromRepo()) === null);
+repo.files[STATE_PATH] = REAL;          // another device got there first
+sync.noteState(emptyDefault());
+await sync.flush();
+check('9: a fresh install re-checks, and does not overwrite a state.json that appeared',
+  repo.files[STATE_PATH] === REAL, repo.files[STATE_PATH].slice(0, 80));
+
+// 9d. ...but a repo that really is empty still gets its first state.
+sync.resetSync();
+delete repo.files[STATE_PATH];
+await sync.loadFromRepo();
+sync.noteState(emptyDefault());
+await sync.flush();
+check('9: a genuinely empty repo still gets its first write',
+  typeof repo.files[STATE_PATH] === 'string' && repo.files[STATE_PATH] !== REAL);
+
+// 9e. and the ordinary case is untouched: loaded, changed, written.
+sync.resetSync();
+repo.files[STATE_PATH] = REAL;
+const live9 = await sync.loadFromRepo();
+live9.categories.a.intervalDays = 5;
+sync.noteState(live9);
+await sync.flush();
+check('9: a loaded state that changed is still written',
+  repo.files[STATE_PATH] !== REAL && JSON.parse(repo.files[STATE_PATH]).categories.a.intervalDays === 5,
+  String(repo.files[STATE_PATH]).slice(0, 80));
+
 // ---------- report ----------
 
 console.log(results.join('\n'));
