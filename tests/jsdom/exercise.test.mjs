@@ -131,6 +131,8 @@ const [first, second] = getState().categoryOrder;
 
 setActiveCategory(first);
 setCategoryField('scheduleStartDate', formatDate(startOfDay()));
+// Calendar days: these fixtures count today, tomorrow and the day after.
+setCategoryField('includeWeekends', true);
 for (const name of ['Первое', 'Второе', 'Третье']) {
   addExercise(createExercise({
     name, description: 'о ' + name, images: [blob, blob], equipment: ['mat'],
@@ -143,6 +145,8 @@ createComplexFromExercises(ids, 0);
 // do" has something to choose between.
 setActiveCategory(second);
 setCategoryField('scheduleStartDate', formatDate(startOfDay()));
+// Calendar days: these fixtures count today, tomorrow and the day after.
+setCategoryField('includeWeekends', true);
 addExercise(createExercise({ name: 'Другое', images: [blob], equipment: ['wall'] }));
 createComplexFromExercises(activeCategory().exercises.map((e) => e.id), 0);
 setActiveCategory(first);

@@ -66,6 +66,8 @@ const [first, second] = getState().categoryOrder;
 // two exercises whose equipment overlaps, which is what the union has to fold.
 setActiveCategory(first);
 setCategoryField('scheduleStartDate', formatDate(startOfDay()));
+// Calendar days: these fixtures count today, tomorrow and the day after.
+setCategoryField('includeWeekends', true);
 for (const [name, equipment] of [
   ['Первое', ['mat', 'roller']],
   ['Второе', ['short_band', 'mat']],
@@ -81,6 +83,8 @@ createComplexFromExercises(ids.slice(3, 4), 2);   // the day after
 
 setActiveCategory(second);
 setCategoryField('scheduleStartDate', formatDate(startOfDay()));
+// Calendar days: these fixtures count today, tomorrow and the day after.
+setCategoryField('includeWeekends', true);
 addExercise(createExercise({ name: 'Второй категории', images: [blob], equipment: ['wall'] }));
 createComplexFromExercises(activeCategory().exercises.map((e) => e.id), 0);  // today
 setActiveCategory(first);

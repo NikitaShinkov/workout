@@ -1402,10 +1402,15 @@ function renderScheduleColumn(state, category) {
       dateInput,
       el('span', { class: 'toolbar-label', text: 'с интервалом' }),
       intervalInput,
+      el('span', { class: 'toolbar-label', text: 'день,' }),
+      // Unchecked unless the category says so: weekends are left out.
+      renderCheckbox('включая выходные,', category.includeWeekends === true, (checked) =>
+        setCategoryField('includeWeekends', checked)
+      ),
       // The end date falls out of the schedule: the last complex still in it.
       el('span', {
         class: 'toolbar-label',
-        text: 'день по ' + (schedule.end ? formatDate(schedule.end) : '—'),
+        text: 'по ' + (schedule.end ? formatDate(schedule.end) : '—'),
       })
     ),
     renderComplexList(state, category, schedule)

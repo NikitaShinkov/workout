@@ -28,6 +28,9 @@
     //   &start=today     schedule every category from today, so the workout
     //                    page - which only ever looks at today, tomorrow and
     //                    the day after - has something to show
+    //   &weekends=off    leave weekends out, as the app does by default; without
+    //                    it every category includes them, so dates run on
+    //                    calendar days the way the suites count them
     //   &rows=N          repeat the seeded exercises up to N rows, numbered, so
     //                    Exercise_list is long enough to scroll
     //   &images=N        seed N images per exercise instead of two, which is
@@ -159,6 +162,14 @@
       const today = toIsoDate(startOfDay());
       for (const id of getState().categoryOrder) {
         getState().categories[id].scheduleStartDate = today;
+      }
+    }
+
+    // The suites count dates in calendar days, so every category includes
+    // weekends here unless &weekends=off asks for the app's own default.
+    if (params.get('weekends') !== 'off') {
+      for (const id of getState().categoryOrder) {
+        getState().categories[id].includeWeekends = true;
       }
     }
 

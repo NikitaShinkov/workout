@@ -154,5 +154,7 @@ export function createCategoryState(name = NEW_CATEGORY_NAME) {
     scheduleEnabled: true,
     scheduleStartDate: defaultStartDate(),
     intervalDays: DEFAULT_INTERVAL_DAYS,
+    // Unchecked by default: the schedule skips Saturdays and Sundays.
+    includeWeekends: false,
   };
 }

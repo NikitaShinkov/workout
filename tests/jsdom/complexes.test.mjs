@@ -42,6 +42,8 @@ const { mountSchedulePage } = await mod('schedule-page.js');
 const { createExercise } = await mod('model.js');
 
 store.resetStore();
+// The dates below are counted in calendar days; weekends get their own section.
+store.setCategoryField('includeWeekends', true);
 mountSchedulePage(document.getElementById('app'));
 
 const $ = (s) => document.querySelector(s);
@@ -438,6 +440,41 @@ layout();
 check('10: otherwise it sits before the first complex due today or later',
   listChildren().indexOf('date-pointer') === 2, listChildren().join(','));
 check('10: exactly one pointer in the list', $$('.date-pointer').length === 1);
+
+// ---------- 11. weekends ----------
+
+// buildSchedule is pure, so the arithmetic is checked on a bare category.
+// 2026-09-03 is a Thursday.
+const { buildSchedule, formatDate: fmt } = await mod('schedule.js');
+const { createCategoryState } = await mod('model.js');
+const weekCat = (fields, count) => ({
+  scheduleStartDate: '2026-09-03', intervalDays: 1,
+  complexes: Array.from({ length: count }, (_, i) => ({ id: 'w' + i, enabled: true, items: [] })),
+  ...fields,
+});
+const weekDates = (category) => {
+  const { dates } = buildSchedule(category);
+  return category.complexes.map((c) => fmt(dates.get(c.id))).join(',');
+};
+
+check('11: a new category leaves weekends out', createCategoryState().includeWeekends === false);
+check('11: a category with no field leaves them out too (old saves)',
+  weekDates(weekCat({}, 4)) === '3 сен,4 сен,7 сен,8 сен', weekDates(weekCat({}, 4)));
+check('11: with weekends included the days are consecutive',
+  weekDates(weekCat({ includeWeekends: true }, 4)) === '3 сен,4 сен,5 сен,6 сен',
+  weekDates(weekCat({ includeWeekends: true }, 4)));
+check('11: without them the interval counts working days',
+  weekDates(weekCat({ intervalDays: 2 }, 4)) === '3 сен,7 сен,9 сен,11 сен',
+  weekDates(weekCat({ intervalDays: 2 }, 4)));
+check('11: a start on a Saturday moves to the Monday',
+  weekDates(weekCat({ scheduleStartDate: '2026-09-05' }, 2)) === '7 сен,8 сен',
+  weekDates(weekCat({ scheduleStartDate: '2026-09-05' }, 2)));
+check('11: unless weekends are included',
+  weekDates(weekCat({ scheduleStartDate: '2026-09-05', includeWeekends: true }, 2)) === '5 сен,6 сен',
+  weekDates(weekCat({ scheduleStartDate: '2026-09-05', includeWeekends: true }, 2)));
+const endOf = (c) => fmt(buildSchedule(c).end);
+check('11: the end date is the last complex\'s, weekends skipped',
+  endOf(weekCat({}, 3)) === '7 сен', endOf(weekCat({}, 3)));
 
 // ---------- report ----------
 

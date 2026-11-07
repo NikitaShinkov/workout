@@ -289,6 +289,59 @@ check('4: unticking brings everything back',
   restored.library === 4 && restored.complexes === 3 && restored.rows === 4,
   JSON.stringify(restored));
 
+// ---------- 5. "включая выходные" ----------
+//
+// &weekends=off is the app's own default; the rest of this suite runs with
+// weekends included so its dates are plain calendar days. 3 сен is a Thursday.
+
+await page.goto(harness('seed=exercises&complexes=2,1,1&weekends=off&extras'), { waitUntil: 'networkidle2' });
+await page.waitForSelector('.complex');
+await new Promise((r) => setTimeout(r, 400));
+
+const weekends = () => page.evaluate(() => {
+  const bar = document.querySelector('.schedule-toolbar');
+  const line = Array.from(bar.querySelectorAll('.checkbox-line'))
+    .find((l) => l.textContent.includes('включая выходные'));
+  const box = line && line.querySelector('.checkbox').getBoundingClientRect();
+  const viewBox = document.querySelector('.view-options .checkbox').getBoundingClientRect();
+  const style = line && getComputedStyle(line.querySelector('.checkbox'));
+  const viewStyle = getComputedStyle(document.querySelector('.view-options .checkbox'));
+  const barRect = bar.getBoundingClientRect();
+  return {
+    found: !!line,
+    inline: !!line && line.classList.contains('checkbox-line--inline'),
+    checked: !!line && line.querySelector('.checkbox__input').checked,
+    text: bar.innerText.replace(/\s+/g, ' ').trim(),
+    sameBox: !!box && box.width === viewBox.width && box.height === viewBox.height
+      && style.backgroundColor === viewStyle.backgroundColor
+      && style.borderTopColor === viewStyle.borderTopColor,
+    centred: !!box && Math.abs((box.top + box.height / 2) - (barRect.top + barRect.height / 2)) <= 1,
+    dates: Array.from(document.querySelectorAll('.complex__date')).map((d) => d.textContent),
+  };
+});
+
+let wk = await weekends();
+check('5: the checkbox is in the toolbar', wk.found);
+check('5: styled like the view_options checkboxes', wk.inline && wk.sameBox, JSON.stringify(wk));
+check('5: centred in the toolbar row', wk.centred);
+check('5: the toolbar reads in the agreed order',
+  wk.text === 'Расписание с с интервалом день, включая выходные, по 7 сен', wk.text);
+check('5: unchecked by default', wk.checked === false);
+check('5: and the schedule skips the weekend', wk.dates.join(',') === '3 сен,4 сен,7 сен',
+  wk.dates.join(','));
+await shot('toolbar-weekends-off', '.schedule-toolbar');
+
+await page.click('.schedule-toolbar .checkbox-line');
+await new Promise((r) => setTimeout(r, 200));
+wk = await weekends();
+check('5: ticking it includes weekends', wk.checked === true);
+check('5: the dates become consecutive', wk.dates.join(',') === '3 сен,4 сен,5 сен',
+  wk.dates.join(','));
+check('5: and the end date follows', wk.text.endsWith('по 5 сен'), wk.text);
+check('5: the store has it',
+  await page.evaluate(async () => (await import('/js/store.js')).activeCategory().includeWeekends === true));
+await shot('toolbar-weekends-on', '.schedule-toolbar');
+
 check('no page errors', errs.length === 0, errs.join(' | '));
 
 console.log(lines.join('\n'));

@@ -121,17 +121,45 @@ export function buildSchedule(category, now = new Date()) {
   const start =
     parseStartDate(category.scheduleStartDate, now) || parseIsoDate(defaultStartDate(now));
   const interval = parseInterval(category.intervalDays);
+  // Off unless the checkbox says otherwise: a category that has never been
+  // told carries no field, and that means weekends are left out.
+  const includeWeekends = category.includeWeekends === true;
 
   const dates = new Map();
-  let slot = 0;
+  let date = includeWeekends ? start : skipWeekend(start);
+  let end = null;
 
   for (const complex of category.complexes || []) {
     if (!complex.enabled) continue;
-    dates.set(complex.id, addDays(start, slot * interval));
-    slot += 1;
+    dates.set(complex.id, date);
+    end = date;
+    date = includeWeekends ? addDays(date, interval) : addWorkingDays(date, interval);
   }
 
-  return { start, interval, dates, end: slot > 0 ? addDays(start, (slot - 1) * interval) : null };
+  return { start, interval, includeWeekends, dates, end };
+}
+
+export function isWeekend(date) {
+  const day = date.getDay();
+  return day === 0 || day === 6;
+}
+
+// A date that falls on Saturday or Sunday -> the Monday after it.
+export function skipWeekend(date) {
+  let next = date;
+  while (isWeekend(next)) next = addDays(next, 1);
+  return next;
+}
+
+// With weekends left out the interval counts WORKING days, so an interval of
+// 1 runs Mon..Fri and then Mon, and an interval of 2 runs Mon, Wed, Fri, Tue.
+export function addWorkingDays(date, days) {
+  let next = date;
+  for (let left = days; left > 0; ) {
+    next = addDays(next, 1);
+    if (!isWeekend(next)) left -= 1;
+  }
+  return next;
 }
 
 // --- the calendar -----------------------------------------------------------

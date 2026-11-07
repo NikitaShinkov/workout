@@ -317,6 +317,7 @@ export async function serializeForRepo(state) {
       scheduleEnabled: category.scheduleEnabled !== false,
       scheduleStartDate: category.scheduleStartDate,
       intervalDays: category.intervalDays,
+      includeWeekends: category.includeWeekends === true,
     };
   }
 
@@ -349,6 +350,7 @@ function serializeText(state) {
       scheduleEnabled: category.scheduleEnabled !== false,
       scheduleStartDate: category.scheduleStartDate,
       intervalDays: category.intervalDays,
+      includeWeekends: category.includeWeekends === true,
     };
   }
 

@@ -627,6 +627,13 @@ else.
   Switching one off shifts every later complex a slot earlier rather than
   leaving a hole (`19 сен, —, 20 сен`). Dates are computed over the whole list,
   so the "только включённые комплексы" checkbox never renumbers anything.
+- **«включая выходные»** (`includeWeekends` on the category, off by default
+  and off when absent, so old saves skip weekends too). Off, the interval
+  counts **working** days — interval 1 runs Mon..Fri then Mon, interval 2
+  Mon, Wed, Fri, Tue — and a start date on a weekend moves to the Monday.
+  `buildSchedule()` owns it, so the calendar and the workout page follow.
+  The test harness turns weekends ON for every category unless
+  `&weekends=off`, because the suites count dates in calendar days.
 - `scheduleStartDate` defaults to `3 сен` (chosen so the Date_pointer lands
   mid-list) with an interval of 1.
 - **The two toolbar fields are keyboard machines, not text boxes**
