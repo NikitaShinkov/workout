@@ -633,6 +633,97 @@ check('9: a loaded state that changed is still written',
   repo.files[STATE_PATH] !== REAL && JSON.parse(repo.files[STATE_PATH]).categories.a.intervalDays === 5,
   String(repo.files[STATE_PATH]).slice(0, 80));
 
+// ---------- 10. «Обновить»: forceSync, staging, recovery ----------
+//
+// jsdom has no IndexedDB, so the staging store is a Map here. What matters is
+// WHEN it is written and cleared, and what a launch does with it.
+
+const staging = await mod('staging.js');
+const staged = new Map();
+staging.setStagingBackend({
+  put: async (v) => { staged.set('s', structuredClone(v)); },
+  get: async () => staged.get('s') || null,
+  clear: async () => { staged.delete('s'); },
+});
+const stateJson = () => JSON.parse(repo.files[STATE_PATH]);
+
+github.setToken('test-token');
+
+// 10a. the ordinary case: a change and an op, sent and confirmed at once.
+sync.resetSync();
+staged.clear();
+repo.files[STATE_PATH] = REAL;
+repo.files[LOG_PATH] = JSON.stringify({ version: 1, ops: [] });
+const live10 = await sync.loadFromRepo();
+live10.categories.a.intervalDays = 7;
+sync.recordOp({ kind: 'favorite', exerciseId: 'ex_1', on: true });
+check('10: something is pending', sync.hasPendingChanges(live10));
+await sync.forceSync(live10);
+check('10: FORCESYNC SENDS THE STRUCTURE', stateJson().categories.a.intervalDays === 7,
+  stateJson().categories.a.intervalDays);
+check('10: and the ops', JSON.parse(repo.files[LOG_PATH]).ops.some((o) => o.kind === 'favorite'));
+check('10: nothing is left pending after it resolves', !sync.hasPendingChanges(live10));
+check('10: and the snapshot is cleared once GitHub confirmed', !staged.has('s'));
+
+// 10b. the snapshot goes down BEFORE the network: with no signal the upload
+// fails, and the snapshot is what is left.
+live10.categories.a.intervalDays = 9;
+repo.offline = true;
+let failed10 = null;
+try { await sync.forceSync(live10); } catch (error) { failed10 = error; }
+repo.offline = false;
+check('10: with no signal it REJECTS rather than reporting success', failed10 !== null);
+check('10: THE STRUCTURE WAS STAGED BEFORE THE NETWORK WAS TRIED',
+  staged.has('s') && staged.get('s').state.categories.a.intervalDays === 9);
+check('10: the repo still has the old value', stateJson().categories.a.intervalDays === 7);
+
+// 10c. the tab is closed now. The next launch finds the repo exactly where the
+// snapshot started from, shows the snapshot, and finishes the upload.
+sync.resetSync();
+const launch = await sync.loadFromRepo();
+check('10: A RELAUNCH SHOWS THE STAGED SNAPSHOT, not the older repo state',
+  launch.categories.a.intervalDays === 9, launch.categories.a.intervalDays);
+check('10: and knows it has an upload to finish', sync.recoveredFromStaging());
+await sync.forceSync(launch);
+check('10: FINISHING IT PUTS THE SNAPSHOT IN THE REPO', stateJson().categories.a.intervalDays === 9);
+check('10: and clears it', !staged.has('s') && !sync.recoveredFromStaging());
+
+// 10d. a stale snapshot is never written over newer data: if the repo moved on
+// after the snapshot was taken, the snapshot is dropped.
+live10.categories.a.intervalDays = 11;
+await staging.putStaged({ savedAt: 1, base: 'not what the repo holds', state: { ...live10 } });
+sync.resetSync();
+const launch2 = await sync.loadFromRepo();
+check('10: A STALE SNAPSHOT IS NOT SHOWN', launch2.categories.a.intervalDays === 9,
+  launch2.categories.a.intervalDays);
+check('10: and is dropped', !staged.has('s') && !sync.recoveredFromStaging());
+
+// 10e. an idle flush already in flight is waited for, not raced: both land and
+// the repo ends with the latest value.
+launch2.categories.a.intervalDays = 12;
+sync.noteState(launch2);
+const idle = sync.flush();                      // in flight now
+launch2.categories.a.intervalDays = 13;         // changed while it runs
+await sync.forceSync(launch2);
+await idle;
+check('10: AN IDLE FLUSH IN FLIGHT IS WAITED FOR, and the latest value wins',
+  stateJson().categories.a.intervalDays === 13, stateJson().categories.a.intervalDays);
+
+// 10f. the three ways it refuses, each with a reason the button can show.
+const reasonOf = async (fn) => { try { await fn(); return 'resolved'; } catch (e) { return e.reason || 'other'; } };
+github.setToken(null);
+check('10: no token -> refused with reason "token"',
+  (await reasonOf(() => sync.forceSync(launch2))) === 'token');
+github.setToken('test-token');
+sync.resetSync();
+check('10: nothing loaded -> refused with reason "unloaded"',
+  (await reasonOf(() => sync.forceSync(launch2))) === 'unloaded');
+dom.window.history.replaceState(null, '', '/?offline=1#schedule');
+check('10: ?offline=1 -> refused with reason "offline"',
+  (await reasonOf(() => sync.forceSync(launch2))) === 'offline');
+dom.window.history.replaceState(null, '', '/#schedule');
+staging.setStagingBackend(null);
+
 // ---------- report ----------
 
 console.log(results.join('\n'));

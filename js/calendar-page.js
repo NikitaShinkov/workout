@@ -28,6 +28,7 @@ import {
 } from './schedule.js';
 import { renderDatePointer, cancelDatePointerDrag } from './date-pointer.js';
 import { renderPageSelector } from './page-selector.js';
+import { renderSaveButton } from './save-button.js';
 import { editCategoryOnOpen } from './schedule-page.js';
 import { categoryButtonContents, categoryButtonClass } from './category-button.js';
 import {
@@ -103,7 +104,8 @@ function renderHeader(state) {
           editCategoryOnOpen(id);
           onNavigate('schedule');
         },
-      })
+      }),
+      renderSaveButton()
     ),
     el(
       'div',

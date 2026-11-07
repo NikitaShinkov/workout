@@ -25,6 +25,7 @@ import {
 } from './store.js';
 import { buildCalendar, dayKey, formatDate, addDays, startOfDay } from './schedule.js';
 import { renderPageSelector } from './page-selector.js';
+import { renderSaveButton } from './save-button.js';
 import { editCategoryOnOpen } from './schedule-page.js';
 import { categoryButtonContents, categoryButtonClass } from './category-button.js';
 import { createSequenceAnimation } from './animation.js';
@@ -290,7 +291,8 @@ function renderHeader(state) {
           editCategoryOnOpen(id);
           onNavigate('schedule');
         },
-      })
+      }),
+      renderSaveButton()
     )
   );
 }

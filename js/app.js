@@ -5,6 +5,7 @@
 // otherwise two pages render into the same container and both react to every
 // mutation. Every mount returns the function that undoes it.
 
+import { installSaveShortcut } from './save-button.js';
 import { mountSchedulePage } from './schedule-page.js';
 import { mountCalendarPage } from './calendar-page.js';
 import { mountWorkoutPage } from './workout-page.js';
@@ -34,6 +35,9 @@ let destroyCurrent = null;
 
 export function mountApp(container) {
   root = container;
+  // Ctrl+S is the «Обновить» button, from every page - the exercise page too,
+  // which has no header to carry the button itself.
+  installSaveShortcut();
   // The workout page is meant to be opened straight from a link on a phone, so
   // the hash - and only the hash - can name the page to start on. Nothing is
   // stored: without one the app opens on the schedule as it always has.

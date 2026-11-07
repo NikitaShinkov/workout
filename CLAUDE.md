@@ -69,7 +69,9 @@ js/main.js            initToken(), initStore(), then mountApp()
 js/app.js             the shell: which page is mounted, and swapping them
 js/store.js           the whole app state; every mutation goes through update()
 js/db.js              the persistence seam - two functions, nothing else
-js/sync.js            the data repo: read, merge, buffer, flush
+js/sync.js            the data repo: read, merge, buffer, flush, forceSync
+js/staging.js         «Обновить»'s write-ahead snapshot (IndexedDB)
+js/save-button.js     «Обновить» and Ctrl+S, on every page with a header
 js/github.js          Git Data API client (blobs -> tree -> commit -> ref)
 js/config.js          which repo the data lives in
 js/model.js           domain constants and factories - no DOM, no storage
@@ -188,6 +190,38 @@ fresh install, re-checked with a second read right before the first write), or
 `null` — nothing read — which is **never** written. `flush()` also returns
 early under `?offline=1`. `jsdom/sync` section 9 replays the wipe, and fails
 three checks against the old code.
+
+**«Обновить» (and Ctrl+S) is a forced, confirmed upload, beside the idle
+flush and not instead of it** — the user asked for the existing system to be
+left exactly as it was, and it is: the 4s idle timer, the hide flush and the
+launch flush are untouched. `forceSync()` in `sync.js` waits for any idle
+flush in flight, holds `running` so none can start under it, **stages the
+structure in IndexedDB before any network call** (`js/staging.js`; ops are
+already durable in localStorage), runs the same `flushOps`/`flushStructure`
+the idle flush uses, loops while anything changed meanwhile, and resolves only
+when nothing is pending — GitHub's answer to the ref update is the
+confirmation. It rejects with a `reason` (`token`, `unloaded`, `offline`,
+`incomplete`) or GitHub's error, and the button turns red with the reason in
+its title; it says «Сохранено» only after a confirmed commit.
+**No browser can finish a multi-request upload after its tab is gone**
+(`sendBeacon` cannot send the Authorization header, `keepalive` covers one
+request, not blobs → tree → commit → ref), so "close the tab right after
+clicking" is covered in two layers: `beforeunload` is held while an upload is
+in flight, and if the user leaves anyway the next launch finds the snapshot.
+`adoptStaged()` in `loadFromRepo` takes it up **only if the repo is exactly
+the snapshot's `base`** (the baseline it was taken against) — then it is shown
+and `main.js` finishes the upload behind the loading screen, silently, before
+mounting. Any other repo state means the repo moved on (the upload landed,
+later saves did, another device wrote), and the snapshot is dropped, never
+written over newer data. The button blurs the focused element and waits two
+ticks first, so Ctrl+S inside the date field saves what was typed (gotcha 15's
+deferred commit). The icon is `resetr_icon.svg` — a cleaned, ASCII-named copy
+of the export `resetr_iсon.svg` (Cyrillic «с»), which carried two opaque
+background rectangles from the Figma frame. On a phone the workout page hides
+its header, so the button is not there. `jsdom/sync` section 10 and
+`browser/save-button` cover it.
+**This is not "durable staging for structural writes"** (the next item on the
+list): only an explicit save is staged; the idle flush still is not.
 
 **The token** rides in the bookmark's fragment (`#workout&k=…`), which is never
 sent to a server. `initToken()` must run **before `mountApp()`**:
@@ -885,7 +919,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 27 suites, ~1150 checks, ~155s
+npm test             all 28 suites, ~1150 checks, ~155s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -918,7 +952,8 @@ covers behaviour that is easy to break silently.
   page — top_block floating
   over the picture, the description sizing itself to its text, the Toolbar,
   Button_next and its ring, the swipe onto the sheet and how the sheet divides
-  the block — `loading` the loading screen and its turn, `date-pointer` dragging the
+  the block — `loading` the loading screen and its turn, `save-button` «Обновить»: its
+  place and look, Ctrl+S, and an upload held mid-flight against a fake GitHub, `date-pointer` dragging the
   Date_pointer on both pages, its 20px grab band and what it does to the dates, `toolbar` the two
   masked fields plus the category switch and the favourites filter,
   `complex-drag` / `complex-layout` the schedule page's lists, `drag` /

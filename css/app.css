@@ -618,6 +618,32 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   height: 12px;
 }
 
+/* «Обновить» (js/save-button.js): a main-button at the right-hand end of the
+   categories row, on every page that has one. */
+.save-button {
+  margin-left: auto;
+  margin-right: 16px;
+}
+
+.save-button[data-status="busy"] {
+  cursor: progress;
+}
+
+.save-button[data-status="busy"] .save-button__icon {
+  animation: save-button-pulse 0.8s ease-in-out infinite alternate;
+}
+
+@keyframes save-button-pulse {
+  from { transform: translateY(1px); opacity: 1; }
+  to { transform: translateY(-2px); opacity: 0.45; }
+}
+
+/* It could not be sent: said plainly, in the colour the app uses for "hard",
+   and it stays until the next attempt. */
+.save-button[data-status="error"] {
+  background: var(--hard);
+}
+
 /* ---------- exercise list ---------- */
 
 .exercise-list,

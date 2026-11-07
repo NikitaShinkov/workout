@@ -41,6 +41,7 @@ import {
 import { renderDatePointer, cancelDatePointerDrag } from './date-pointer.js';
 import { createDateInput, createIntervalInput } from './toolbar-inputs.js';
 import { renderPageSelector } from './page-selector.js';
+import { renderSaveButton } from './save-button.js';
 import { categoryButtonContents, categoryButtonClass } from './category-button.js';
 import {
   renderExerciseRow as renderRow,
@@ -950,7 +951,8 @@ function renderHeader(state) {
       }),
       // Filled in by refreshUndoSlot, which ticks once a second on its own so
       // the countdown does not re-render the whole page.
-      el('div', { class: 'undo-slot' })
+      el('div', { class: 'undo-slot' }),
+      renderSaveButton()
     ),
     renderViewOptions(state)
   );

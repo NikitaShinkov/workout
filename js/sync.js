@@ -29,6 +29,7 @@ import { STATE_PATH, LOG_PATH, IMAGE_DIR } from './config.js';
 import { readJson, readFile, commitFiles, setToken, hasToken } from './github.js';
 import { hashImage, blobBytes } from './images.js';
 import { uid } from './model.js';
+import { putStaged, getStaged, clearStaged } from './staging.js';
 
 const TOKEN_KEY = 'workout.token';
 const CACHE_KEY = 'workout.cache';
@@ -181,7 +182,41 @@ export async function loadFromRepo() {
 
   baseline = serializeText(merged);
   loadedFrom = 'repo';
-  return merged;
+  return (await adoptStaged(merged, fetched.log)) || merged;
+}
+
+// The «Обновить» button stages the structure before it uploads (js/staging.js).
+// A snapshot still there at launch is an upload the tab did not live to see
+// confirmed. It is taken up only if the repo is EXACTLY what the snapshot was
+// based on - the upload never landed and nothing else has been written since.
+// Anything else means the repo has moved on (the upload landed, or later saves
+// did, or another device wrote), and the snapshot is stale: it is dropped,
+// never written over newer data. Only the structure comes from the snapshot;
+// the log is re-applied over it, so ratings recorded meanwhile are kept.
+// The baseline stays the repo's, so the snapshot reads as a change to send.
+let recovered = false;
+
+async function adoptStaged(merged, log) {
+  recovered = false;
+  const staged = await getStaged();
+  if (!staged || !staged.state) return null;
+
+  if (staged.base !== baseline) {
+    // Not cleared from a cached copy: with no signal there is no telling
+    // whether the repo has moved on, and the next launch can decide.
+    if (navigator.onLine !== false) clearStaged().catch(() => {});
+    return null;
+  }
+
+  const adopted = applyOps(staged.state, log);
+  applyOps(adopted, { ops: bufferRead() });
+  recovered = true;
+  return adopted;
+}
+
+// True when this launch is showing a staged snapshot that still has to go up.
+export function recoveredFromStaging() {
+  return recovered;
 }
 
 function imagePaths(state) {
@@ -540,6 +575,92 @@ async function flushStructure() {
   baseline = serializeText(latestState);
 }
 
+// --- the «Обновить» button: a forced, confirmed upload -------------------------
+//
+// An addition beside the idle flush, not a change to it: the timer, the hide
+// flush and the launch flush all behave exactly as before. This is what runs
+// when the user asks for everything to go up NOW and wants to know it did.
+//
+//   1. wait for any idle flush already in flight, then hold the flag so no
+//      other flush can start underneath this one;
+//   2. stage the structure durably (IndexedDB) BEFORE any network call - the
+//      ops are already durable, they sit in localStorage from the moment they
+//      are recorded;
+//   3. send the ops, then the structure, through the same two functions the
+//      idle flush uses, and go round again if anything was changed meanwhile;
+//   4. resolve only when nothing is left: every op sent and the structure equal
+//      to what the repo now holds. GitHub's answer to the ref update is the
+//      confirmation - the commit is in the repo when that request succeeds.
+//
+// Throws, with a `reason`, when it cannot get there - and leaves the snapshot
+// staged, so the next launch can still finish the job.
+
+export class SyncError extends Error {
+  constructor(reason, message) {
+    super(message);
+    this.reason = reason;
+  }
+}
+
+function structureOf(state) {
+  return {
+    version: state.version,
+    categoryOrder: state.categoryOrder,
+    categories: state.categories,
+    lastEquipment: state.lastEquipment,
+  };
+}
+
+function settled(state) {
+  return bufferRead().length === 0 && serializeText(state) === baseline;
+}
+
+export function hasPendingChanges(state = latestState) {
+  return bufferRead().length > 0 || (Boolean(state) && serializeText(state) !== baseline);
+}
+
+async function idleFlushFinished() {
+  while (running) await new Promise((resolve) => setTimeout(resolve, 50));
+}
+
+export async function forceSync(state) {
+  if (offline()) throw new SyncError('offline', 'Открыто с ?offline=1 - здесь ничего не сохраняется.');
+  if (!hasToken()) throw new SyncError('token', 'В этом браузере нет токена - сохранять некуда.');
+  if (loadedFrom === null) {
+    throw new SyncError('unloaded', 'Данные не были загружены из репозитория - записывать их нельзя.');
+  }
+
+  await idleFlushFinished();
+  running = true;
+  try {
+    latestState = state;
+
+    if (serializeText(state) !== baseline) {
+      await putStaged({ savedAt: Date.now(), base: baseline, state: structureOf(state) });
+    }
+
+    for (let round = 0; round < 3 && !settled(state); round += 1) {
+      await flushOps();
+      await flushStructure();
+    }
+
+    if (!settled(state)) {
+      throw new SyncError('incomplete', 'Не всё удалось отправить - попробуйте ещё раз.');
+    }
+  } finally {
+    running = false;
+  }
+
+  recovered = false;
+  try {
+    await clearStaged();
+  } catch (error) {
+    // Harmless: at the next launch the repo no longer matches the snapshot's
+    // base, so the snapshot is recognised as stale and dropped.
+    console.warn('Could not clear the staged snapshot:', error);
+  }
+}
+
 // --- lifecycle ---------------------------------------------------------------
 
 // visibilitychange is the last moment a browser reliably gives us; pagehide is
@@ -559,6 +680,7 @@ export function resetSync() {
   latestState = null;
   baseline = null;
   loadedFrom = null;
+  recovered = false;
   committedImages.clear();
   bufferWrite([]);
 }

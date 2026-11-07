@@ -1,7 +1,7 @@
 // Entry point: pick up the token, load from the data repo, then mount.
 
-import { initToken, watchForHide, flush, hasToken } from './sync.js';
-import { initStore } from './store.js';
+import { initToken, watchForHide, flush, hasToken, forceSync, recoveredFromStaging } from './sync.js';
+import { initStore, getState } from './store.js';
 import { mountApp } from './app.js';
 import { showLoading } from './loading.js';
 
@@ -18,6 +18,18 @@ async function start() {
   const hideLoading = showLoading(app);
 
   await initStore();
+
+  // A «Обновить» upload the last session did not live to see confirmed: the
+  // store is showing its staged snapshot, so finish sending it - behind the
+  // loading screen, so nothing can be edited into the race, and silently. If
+  // it cannot go up now it stays staged and is tried again next launch.
+  if (recoveredFromStaging() && hasToken()) {
+    try {
+      await forceSync(getState());
+    } catch (error) {
+      console.warn('Could not finish the staged upload; it stays staged:', error);
+    }
+  }
 
   hideLoading();
   mountApp(app);
