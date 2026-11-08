@@ -22,6 +22,10 @@ import {
   deleteCategory,
   restoreCategory,
   restoreRemoved,
+  copyExercisesToCategory,
+  copyComplexesToCategory,
+  copyExercisesAsComplex,
+  removeCopies,
   reorderCategories,
   createComplexFromExercises,
   addExercisesToComplex,
@@ -150,6 +154,8 @@ export function mountSchedulePage(container, navigate) {
   document.addEventListener('keydown', onDocumentKeydown);
   document.addEventListener('click', onDocumentClick);
   document.addEventListener('mousemove', onDocumentMouseMove);
+  document.addEventListener('dragover', onDocumentDragOver);
+  document.addEventListener('drop', onDocumentDrop);
 
   const unsubscribe = subscribe(render);
   render();
@@ -173,6 +179,8 @@ export function mountSchedulePage(container, navigate) {
     document.removeEventListener('keydown', onDocumentKeydown);
     document.removeEventListener('click', onDocumentClick);
     document.removeEventListener('mousemove', onDocumentMouseMove);
+    document.removeEventListener('dragover', onDocumentDragOver);
+    document.removeEventListener('drop', onDocumentDrop);
     releaseHover(); // the class outlives the page otherwise
     pagePicker.remove();
     pagePicker = null;
@@ -628,7 +636,14 @@ function draggedKeys(scope, key) {
 }
 
 function onRowDragStart(event, context, rowEl) {
-  drag = { kind: context.scope, ids: draggedKeys(context.scope, context.key) };
+  drag = {
+    kind: context.scope,
+    ids: draggedKeys(context.scope, context.key),
+    // Where the drag began, and the node it began on - see "carrying a drag
+    // into another category" below for why both are kept.
+    from: getState().ui.activeCategory,
+    source: rowEl,
+  };
 
   event.dataTransfer.setData('text/plain', drag.ids.join(','));
   // A library row does BOTH: it is copied into the schedule, and moved when it
@@ -666,6 +681,134 @@ function endDrag() {
   drag = null;
   rowDropTarget = null;
   complexDropTarget = null;
+  const park = document.querySelector('.drag-source-park');
+  if (park) park.remove();
+}
+
+// --- carrying a drag into another category ---------------------------------
+//
+// Exercises and complexes dragged onto a category button open that category,
+// mid-drag, and are COPIED into it on release:
+//   - released anywhere but the two lists: at the end of their own list
+//     (exercises -> Exercise_list, complexes -> Complex_list);
+//   - exercises in Exercise_list: there, where the marker says;
+//   - exercises in Complex_list: ONE new complex of them at that boundary,
+//     the exercises themselves added to the end of Exercise_list;
+//   - complexes in Complex_list: there. Exercise_list refuses a complex.
+// Blocks inside a complex do not travel - a block is a place in a schedule,
+// and it has no meaning in a different one.
+//
+// Opening the category re-renders the page, and the node the drag started on
+// goes with it - which does not stop the drag, but would stop its dragend
+// from ever arriving, so a cancelled drag would leave `drag` set. So before
+// the switch the source node is PARKED: moved, alive, into an off-screen
+// holder on <body>, where its dragend still fires. endDrag clears the holder.
+
+function carriesAcross() {
+  return Boolean(drag) && (drag.kind === 'library' || drag.kind === 'complex');
+}
+
+// The drag is over a category it did not start in.
+function isForeign() {
+  return carriesAcross() && drag.from !== getState().ui.activeCategory;
+}
+
+// The lists that take this drag in another category: exercises go into either,
+// complexes into Complex_list only.
+function acceptingLists() {
+  return drag.kind === 'library' ? '.exercise-list, .complex-list' : '.complex-list';
+}
+
+function switchCategoryMidDrag(id) {
+  const source = drag.source;
+  if (source && root.contains(source)) {
+    let park = document.querySelector('.drag-source-park');
+    if (!park) {
+      park = el('div', { class: 'drag-source-park', 'aria-hidden': 'true' });
+      document.body.appendChild(park);
+    }
+    park.appendChild(source);
+  }
+
+  activeHoverArmed = false;
+  clearSelection();
+  stopAutoScroll();
+  rowDropTarget = null;
+  complexDropTarget = null;
+  setActiveCategory(id); // renders the category's page
+
+  if (!isForeign()) return; // back home: nothing to copy, nothing to point at
+  // Every list the drag can go into opens at its end.
+  for (const list of root.querySelectorAll(acceptingLists())) list.scrollTop = list.scrollHeight;
+  paintEndMarker();
+}
+
+// The blue bar under the last row or complex: "it goes at the end".
+function paintEndMarker() {
+  clearDropMarkers();
+  if (drag.kind === 'library') {
+    const rows = root.querySelectorAll('.exercise-list .exercise-row');
+    if (rows.length) rows[rows.length - 1].classList.add('exercise-row--drop-after');
+    return;
+  }
+  const list = root.querySelector('.complex-list');
+  if (!list) return;
+  const complexes = list.querySelectorAll('.complex');
+  if (complexes.length) complexes[complexes.length - 1].classList.add('complex--drop-after');
+  else list.classList.add('complex-list--drop');
+}
+
+// Anywhere on the page that is not a list means "at the end". Inside a list
+// that takes the drag the list's handlers take over; inside one that does not,
+// nothing is accepted and the end marker comes off so it does not promise a
+// drop.
+function onDocumentDragOver(event) {
+  if (!isForeign()) return;
+  const list = event.target.closest && event.target.closest('.exercise-list, .complex-list');
+  if (list) {
+    if (!list.matches(acceptingLists())) {
+      clearDropMarkers();
+      stopAutoScroll();
+    }
+    return;
+  }
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+  stopAutoScroll();
+  paintEndMarker();
+}
+
+function onDocumentDrop(event) {
+  if (!isForeign()) return;
+  if (event.target.closest && event.target.closest('.exercise-list, .complex-list')) return;
+  event.preventDefault();
+  copyAcross(null);
+}
+
+// `at` is a position in the target's FULL list, or null for the end - which
+// also scrolls the list on to its new last row. `asComplex` is for exercises
+// dropped into Complex_list, where `at` is a complex boundary.
+function copyAcross(at, asComplex = false) {
+  const { kind, ids, from } = drag;
+  endDrag();
+
+  const state = getState();
+  const to = state.ui.activeCategory;
+  const target = state.categories[to];
+  if (!target) return;
+
+  const index = at === null ? Infinity : at;
+  let record;
+  if (kind === 'complex') record = copyComplexesToCategory(from, ids, to, index);
+  else if (asComplex) record = copyExercisesAsComplex(from, ids, to, index);
+  else record = copyExercisesToCategory(from, ids, to, index);
+  if (!record) return;
+
+  if (at === null) {
+    const list = root.querySelector(kind === 'library' ? '.exercise-list' : '.complex-list');
+    if (list) list.scrollTop = list.scrollHeight;
+  }
+  offerUndo('Отменить перенос в ' + shortName(target.name), () => removeCopies(record));
 }
 
 // --- edge auto-scroll while dragging ---------------------------------------
@@ -717,7 +860,7 @@ function onLibraryRowDragOver(event, index, rowEl) {
   // drop is simply not accepted.
   if (!drag || drag.kind !== 'library') return;
   event.preventDefault();
-  event.dataTransfer.dropEffect = 'move';
+  event.dataTransfer.dropEffect = isForeign() ? 'copy' : 'move';
 
   const box = rowEl.getBoundingClientRect();
   const after = event.clientY > box.top + box.height / 2;
@@ -735,6 +878,13 @@ function onLibraryDrop(event) {
 
   const ids = drag.ids;
   const target = rowDropTarget;
+
+  // From another category: a copy, at the marker - or at the end, if the
+  // pointer came in without crossing a row.
+  if (isForeign()) {
+    copyAcross(target === null ? null : fullExerciseIndex(target));
+    return;
+  }
   endDrag();
 
   // The position is one among the rows on screen; "только избранные" may have
@@ -768,8 +918,9 @@ function onComplexListDragOver(event) {
 
   const list = event.currentTarget;
   // A whole complex can only ever land between complexes, so it ignores the row
-  // under the cursor.
-  const row = drag.kind === 'complex'
+  // under the cursor - and so do exercises from another category, which always
+  // become a complex of their own rather than joining one.
+  const row = drag.kind === 'complex' || isForeign()
     ? null
     : event.target.closest && event.target.closest('.exercise-row');
 
@@ -778,7 +929,7 @@ function onComplexListDragOver(event) {
     : { type: 'complex', index: complexBoundaryAt(list, event.clientY) };
 
   event.preventDefault();
-  event.dataTransfer.dropEffect = drag.kind === 'library' ? 'copy' : 'move';
+  event.dataTransfer.dropEffect = drag.kind === 'library' || isForeign() ? 'copy' : 'move';
   paintComplexDropMarker(list);
   updateAutoScroll('.complex-list', event.clientY);
 }
@@ -830,6 +981,14 @@ function paintComplexDropMarker(list) {
 
 function onComplexListDrop(event) {
   if (!drag) return;
+  if (isForeign()) {
+    event.preventDefault();
+    const target = complexDropTarget;
+    const at = target ? fullComplexIndex(target.index) : null;
+    if (drag.kind === 'complex') copyAcross(at);
+    else copyAcross(at === null ? Infinity : at, true);
+    return;
+  }
   event.preventDefault();
 
   const kind = drag.kind;
@@ -1194,6 +1353,13 @@ function renderMenuButton(state, category, index) {
   });
 
   node.addEventListener('dragover', (event) => {
+    // Exercises or complexes carried over a category open it. The drop itself
+    // is the document's (onDocumentDragOver / onDocumentDrop): the button is
+    // just one more place on the page that means "at the end".
+    if (carriesAcross()) {
+      if (category.id !== getState().ui.activeCategory) switchCategoryMidDrag(category.id);
+      return;
+    }
     if (!draggingCategoryId) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -1546,9 +1712,16 @@ function renderComplex(state, category, complex, index, date, firstItemIndex) {
   // block the drag image is snapshotted from.
   const side = node.querySelector('.complex__side');
   side.addEventListener('dragstart', (event) => {
-    drag = { kind: 'complex', ids: draggedKeys('complex', complex.id) };
+    drag = {
+      kind: 'complex',
+      ids: draggedKeys('complex', complex.id),
+      from: getState().ui.activeCategory,
+      source: side,
+    };
     event.dataTransfer.setData('text/plain', drag.ids.join(','));
-    event.dataTransfer.effectAllowed = 'move';
+    // Moved within its own list, COPIED into another category - and a
+    // dropEffect outside effectAllowed is refused without a word (gotcha 14).
+    event.dataTransfer.effectAllowed = 'copyMove';
 
     // Only the side block is draggable - the exercise rows to its right have to
     // stay draggable in their own right - but what travels with the cursor
@@ -1612,7 +1785,7 @@ function renderExerciseColumn(state, category) {
     if (event.target === list && drag && drag.kind === 'library') {
       event.preventDefault();
       // Must agree with effectAllowed, or the drop is silently refused.
-      event.dataTransfer.dropEffect = 'move';
+      event.dataTransfer.dropEffect = isForeign() ? 'copy' : 'move';
       rowDropTarget = visibleExercises(state, category).length;
       clearDropMarkers();
       updateAutoScroll('.exercise-list', event.clientY);

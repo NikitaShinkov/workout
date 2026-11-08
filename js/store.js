@@ -8,6 +8,7 @@ import {
   createCategoryState,
   createComplex,
   createComplexItem,
+  createExercise,
   uid,
 } from './model.js';
 import { defaultStartDate, dayKey } from './schedule.js';
@@ -290,6 +291,139 @@ export function deleteExercises(ids) {
     category.exercises = category.exercises.filter((e) => !doomed.has(e.id));
     // Scheduled copies point at the exercise, so they go with it.
     dropItems(category, (item) => doomed.has(item.exerciseId));
+  });
+}
+
+// --- copying into another category -----------------------------------------
+//
+// Dragging exercises or complexes onto another category COPIES them there: the
+// originals stay where they were, and the copies are new, independent objects
+// with ids of their own - editing or deleting one never touches the other.
+//
+// A copy takes what the exercise IS (name, description, equipment, pictures)
+// and not what was done with it. Favourite, duration and ratings are the log's,
+// keyed by exercise id, and that history belongs to the original; a copy starts
+// with none, exactly as if it had been added by hand. Images are content-
+// addressed and immutable, so the copy shares them rather than duplicating.
+//
+// Both return a record for removeCopies(), or null when nothing was copied.
+
+function copyExercise(exercise) {
+  return createExercise({
+    name: exercise.name,
+    description: exercise.description,
+    equipment: exercise.equipment || [],
+    images: exercise.images || [],
+  });
+}
+
+export function copyExercisesToCategory(fromId, exerciseIds, toId, insertIndex) {
+  let record = null;
+
+  update((draft) => {
+    const from = draft.categories[fromId];
+    const to = draft.categories[toId];
+    if (!from || !to || fromId === toId) return;
+
+    // In the order they stand in the list, whatever order they were picked in.
+    const wanted = new Set(exerciseIds);
+    const copies = from.exercises.filter((e) => wanted.has(e.id)).map(copyExercise);
+    if (copies.length === 0) return;
+
+    to.exercises.splice(clampIndex(insertIndex, to.exercises.length), 0, ...copies);
+    record = { categoryId: toId, exerciseIds: copies.map((e) => e.id), complexIds: [] };
+  });
+
+  return record;
+}
+
+// Exercises dropped into another category's Complex_list: copies at the end of
+// its Exercise_list, and ONE new complex of them at `complexIndex`.
+export function copyExercisesAsComplex(fromId, exerciseIds, toId, complexIndex) {
+  let record = null;
+
+  update((draft) => {
+    const from = draft.categories[fromId];
+    const to = draft.categories[toId];
+    if (!from || !to || fromId === toId) return;
+
+    const wanted = new Set(exerciseIds);
+    const copies = from.exercises.filter((e) => wanted.has(e.id)).map(copyExercise);
+    if (copies.length === 0) return;
+
+    const complex = createComplex(copies.map((e) => e.id));
+    to.exercises.push(...copies);
+    to.complexes.splice(clampIndex(complexIndex, to.complexes.length), 0, complex);
+    record = { categoryId: toId, exerciseIds: copies.map((e) => e.id), complexIds: [complex.id] };
+  });
+
+  return record;
+}
+
+// A complex copied across brings its exercises with it: each one it schedules
+// gets a copy at the end of the target's Exercise_list, and the copied complex
+// points at those. An exercise scheduled twice - in one complex or across the
+// complexes being copied - is copied once and pointed at twice, as it was.
+export function copyComplexesToCategory(fromId, complexIds, toId, insertIndex) {
+  let record = null;
+
+  update((draft) => {
+    const from = draft.categories[fromId];
+    const to = draft.categories[toId];
+    if (!from || !to || fromId === toId) return;
+
+    const wanted = new Set(complexIds);
+    const source = new Map(from.exercises.map((e) => [e.id, e]));
+    const copyOf = new Map();
+
+    const complexes = from.complexes
+      .filter((complex) => wanted.has(complex.id))
+      .map((complex) => ({
+        ...createComplex(),
+        enabled: complex.enabled,
+        items: complex.items
+          .filter((item) => source.has(item.exerciseId))
+          .map((item) => {
+            if (!copyOf.has(item.exerciseId)) {
+              copyOf.set(item.exerciseId, copyExercise(source.get(item.exerciseId)));
+            }
+            return createComplexItem(copyOf.get(item.exerciseId).id);
+          }),
+      }))
+      .filter((complex) => complex.items.length > 0);
+    if (complexes.length === 0) return;
+
+    const exercises = Array.from(copyOf.values());
+    to.exercises.push(...exercises);
+    to.complexes.splice(clampIndex(insertIndex, to.complexes.length), 0, ...complexes);
+    record = {
+      categoryId: toId,
+      exerciseIds: exercises.map((e) => e.id),
+      complexIds: complexes.map((c) => c.id),
+    };
+  });
+
+  return record;
+}
+
+// Undo a copy: take out exactly the exercises and complexes it made, and any
+// block that has come to point at one of those exercises since. Anything
+// already gone is simply not there to remove. Opens the category, so the undo
+// happens where it can be seen.
+export function removeCopies(record) {
+  if (!record) return;
+
+  update((draft) => {
+    const category = draft.categories[record.categoryId];
+    if (!category) return;
+
+    const exercises = new Set(record.exerciseIds);
+    const complexes = new Set(record.complexIds);
+    category.complexes = category.complexes.filter((complex) => !complexes.has(complex.id));
+    category.exercises = category.exercises.filter((e) => !exercises.has(e.id));
+    dropItems(category, (item) => exercises.has(item.exerciseId));
+
+    draft.ui.activeCategory = record.categoryId;
   });
 }
 

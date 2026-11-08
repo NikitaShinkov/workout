@@ -1924,3 +1924,14 @@ body:not(.hover-off) .exercise-list:hover .exercise-row--linked:not(:hover) {
     animation: none;
   }
 }
+
+/* Where the node a drag started on waits while the drag is carried into
+   another category - alive, so its dragend still fires, and out of sight.
+   See "carrying a drag into another category" in js/schedule-page.js. */
+.drag-source-park {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  width: 600px;
+  pointer-events: none;
+}

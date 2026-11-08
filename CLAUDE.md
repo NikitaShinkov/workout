@@ -547,6 +547,23 @@ sample its pixels. Both cases turned out to be "invert to white ground".
     interaction was living on, and the events that follow are about the new
     node, not about the user.
 
+27. **A drag can outlive a re-render, but its dragend cannot outlive its
+    node.** Carrying a drag onto a category button re-renders the whole page
+    mid-drag. Chrome keeps the drag session going and delivers dragover and
+    drop to the NEW nodes — but `dragend` goes to the node the drag began on,
+    and a node `clear(root)` threw away gets nothing, so a cancelled drag
+    would leave `drag` set for ever. `switchCategoryMidDrag()` therefore
+    **parks** the source node first: moved, alive, into `.drag-source-park`
+    on `<body>` (off-screen), where its own dragend still fires and calls
+    `endDrag()`, which clears the park. `browser/cross-category` section 2
+    cancels with Escape to prove it.
+    **And a native drag in headless Chrome is not a reliable test driver**:
+    it lags the mouse and can lose the last dragover and the drop itself, with
+    no category switch involved at all. Use native mouse down/move/up only for
+    what needs a real drag session (surviving the switch, dragend), and
+    `setDragInterception` for anything about positions — as every other drag
+    suite does.
+
 ## Pages
 
 `js/app.js` is the shell: it mounts one page into `#app` and swaps it on
@@ -655,6 +672,29 @@ else.
   (`.undo-slot`: absolute, `left: calc(50vw - 16px)` because the row starts at
   the header's 16px padding). Out of flow, so it moves nothing; `pointer-events`
   only on the button. `browser/hover-undo` measures it.
+- **Exercises and complexes can be carried into another category** by
+  dragging them (one, or the selection) onto its button: the category opens
+  mid-drag, every list the drag can go into scrolls to the bottom (exercises:
+  both lists; complexes: Complex_list) with the blue bar under the last row of
+  its default list, and the release **copies** — to the end of that default
+  list when released anywhere but the two lists (the button itself included),
+  or at the marker inside a list. Exercises dropped in Complex_list become
+  **one new complex** at that boundary (never joining an existing one, so
+  rows there resolve to boundaries too — `copyExercisesAsComplex`), their
+  copies going to the end of Exercise_list. Complexes go only into
+  Complex_list; Exercise_list refuses them and drops the marker. Hovering
+  the category the drag came from goes back, and there a release outside the
+  lists does nothing. Blocks inside a complex do not travel.
+  The copies are **new objects with new ids**: name, description, equipment
+  and the same content-addressed pictures, but none of the log's history
+  (favourite, duration, ratings — those belong to the original's id). A
+  complex brings a copy of every exercise it schedules to the end of
+  Exercise_list; one exercise scheduled twice is copied once and pointed at
+  twice. `copyExercisesToCategory` / `copyComplexesToCategory` in the store
+  (and `copyExercisesAsComplex`) return a record, `removeCopies()` undoes it, and the undo button says
+  «Отменить перенос в <категория>» on the same stack as the deletions.
+  `jsdom/cross-category` and `browser/cross-category`; gotcha 27 for the
+  parked source node.
 - Menu button width is fixed by an invisible sizer span carrying the **saved**
   name — that is what keeps it steady on hover and while typing a longer name.
 - Store state is version 2. `migrate()` in `js/store.js` upgrades version-1
@@ -946,7 +986,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 28 suites, ~1150 checks, ~155s
+npm test             all 30 suites, ~1260 checks, ~180s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```
@@ -983,7 +1023,8 @@ covers behaviour that is easy to break silently.
   place and look, Ctrl+S, and an upload held mid-flight against a fake GitHub, `date-pointer` dragging the
   Date_pointer on both pages, its 20px grab band and what it does to the dates, `toolbar` the two
   masked fields plus the category switch and the favourites filter,
-  `complex-drag` / `complex-layout` the schedule page's lists, `drag` /
+  `complex-drag` / `complex-layout` the schedule page's lists, `cross-category`
+  carrying exercises and complexes into another category, `drag` /
   `category-layout` / `hover-undo` the category menu, `row-layout` / `text` /
   `page-layout` typography and geometry.
   Two of them hold the network open on purpose so a transient state stays put
