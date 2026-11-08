@@ -536,6 +536,69 @@ check('10b: A STORED TOKEN IS WRITTEN BACK INTO THE URL',
 
 await page.evaluate(() => localStorage.removeItem('workout.token'));
 
+// ============================================================
+// 11. tapping a complex keeps Complex_list where it was scrolled
+// ============================================================
+
+// A phone, and a day long enough to scroll: every category gets a complex on
+// today, so today lists seven of them.
+await page.setViewport({ ...PHONE, height: 480, hasTouch: true, isMobile: true });
+await page.goto(harness('seed=exercises&complexes=2,1,1&start=today&page=workout'), { waitUntil: 'networkidle2' });
+await page.waitForSelector('.workout-complex');
+await page.evaluate(async () => {
+  const store = await import('/js/store.js');
+  const { createExercise } = await import('/js/model.js');
+  const { dayKey } = await import('/js/schedule.js');
+  const home = store.getState().ui.activeCategory;
+  for (const id of store.getState().categoryOrder) {
+    if (id === home) continue;
+    store.setActiveCategory(id);
+    store.addExercise(createExercise({ name: 'Упражнение ' + id, description: 'd', images: [], equipment: ['mat'] }));
+    const category = store.activeCategory();
+    store.createComplexFromExercises([category.exercises[0].id], 0);
+    store.setCategoryField('scheduleStartDate', dayKey(new Date()));
+    store.setCategoryField('includeWeekends', true);
+  }
+  store.setActiveCategory(home);
+});
+await new Promise((r) => setTimeout(r, 300));
+
+const listState = () => page.evaluate(() => {
+  const list = document.querySelector('.complex-list--workout');
+  const active = document.querySelector('.workout-complex--active');
+  return {
+    cards: list.querySelectorAll('.workout-complex').length,
+    top: Math.round(list.scrollTop),
+    max: list.scrollHeight - list.clientHeight,
+    active: [...list.querySelectorAll('.workout-complex')].indexOf(active),
+    preview: document.querySelector('.workout-preview')?.textContent || '',
+  };
+});
+let ls = await listState();
+check('11: today has enough complexes to scroll', ls.cards >= 5 && ls.max > 40, JSON.stringify(ls));
+
+await page.evaluate(() => { const l = document.querySelector('.complex-list--workout'); l.scrollTop = l.scrollHeight; });
+await new Promise((r) => setTimeout(r, 150));
+const scrolled = (await listState()).top;
+// Tap the last complex - only reachable by scrolling down.
+const lastCard = await page.evaluate(() => {
+  const cards = document.querySelectorAll('.complex-list--workout .workout-complex');
+  const r = cards[cards.length - 1].querySelector('.workout-complex__text').getBoundingClientRect();
+  return { x: Math.round(r.left + 10), y: Math.round(r.top + r.height / 2) };
+});
+await page.touchscreen.tap(lastCard.x, lastCard.y);
+await new Promise((r) => setTimeout(r, 300));
+ls = await listState();
+check('11: the tap selected that complex', ls.active === ls.cards - 1, JSON.stringify(ls));
+check('11: THE LIST STAYS EXACTLY WHERE IT WAS SCROLLED', scrolled > 0 && ls.top === scrolled,
+  JSON.stringify({ scrolled, now: ls.top }));
+await shot('workout-11-kept-scroll', '.page--workout');
+
+// Another day is another list, and starts at its top.
+await page.evaluate(() => document.querySelectorAll('.date-button')[1].click());
+await new Promise((r) => setTimeout(r, 300));
+check('11: switching the day starts the new list at its top', (await listState()).top === 0);
+
 check('no page errors', errs.length === 0, errs.join(' | '));
 
 console.log(lines.join('\n'));

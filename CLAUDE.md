@@ -820,6 +820,12 @@ else.
   settle made the whole page feel like it lagged behind the gesture. By hand and
   not by rendering, for the usual reason — a render would replace the very track
   that is mid-glide.
+- **Complex_list's scroll survives a render** on the workout page, as on the
+  schedule page (gotcha 12): tapping a complex re-renders the whole page, and
+  the list used to jump back to the top under the finger. `render()` carries
+  `scrollTop` across — but only while `renderedDay` is the same day; another
+  day is another list and opens at its top. `browser/workout-layout` section
+  11, which fails on the old code (158px → 0).
 - **Frames survive a render.** `frameByExercise` remembers where each exercise's
   sequence had got to, and `setFrames(urls, startAt)` puts it back. Without it
   every render — and a swipe ends in one — restarted every animation at frame

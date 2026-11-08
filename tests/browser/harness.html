@@ -36,13 +36,16 @@
     //   &images=N        seed N images per exercise instead of two, which is
     //                    how the exercise page's sheet of every image gets one,
     //                    a pair and a grid to lay out
+    //   &everycategory=N  give every category without one a few complexes
+    //                    (adding categories up to N), so
+    //                    the workout page lists one per category per day
     //   &page=calendar   open on that page instead of the schedule
     //   &page=exercise   start the active category's first complex and open the
     //                    exercise page on it. Needs &start=today, since only
     //                    today's complexes can be started.
     import {
       resetStore, addExercise, setUiFlag, activeCategory,
-      createComplexFromExercises, setComplexEnabled, setActiveCategory, getState,
+      createComplexFromExercises, setComplexEnabled, setActiveCategory, getState, addCategory,
     } from '/js/store.js';
     import { toIsoDate, startOfDay } from '/js/schedule.js';
     import { mountApp, goToPage } from '/js/app.js';
@@ -151,6 +154,36 @@
       }
       for (const exercise of activeCategory().exercises) {
         createComplexFromExercises([exercise.id], activeCategory().complexes.length);
+      }
+      setActiveCategory(home);
+    }
+
+    // Every category that has no complex gets one of its own, so with
+    // &start=today the workout page lists one per category on each day - long
+    // enough for its Complex_list to scroll on a phone.
+    if (params.has('everycategory')) {
+      const home = getState().ui.activeCategory;
+      // =N adds categories until there are N, for a list longer than seven.
+      const wanted = Number(params.get('everycategory')) || 0;
+      for (let k = getState().categoryOrder.length; k < wanted; k += 1) addCategory('Категория ' + (k + 1));
+      setActiveCategory(home);
+      let n = 0;
+      for (const id of getState().categoryOrder) {
+        if (getState().categories[id].complexes.length) continue;
+        setActiveCategory(id);
+        for (let i = 0; i < 3; i += 1) {
+          n += 1;
+          addExercise(createExercise({
+            name: getState().categories[id].name + ': упражнение ' + (i + 1),
+            description: 'Упражнение категории ' + getState().categories[id].name + '.',
+            images: [await makeImage('C' + n, COLORS[n % COLORS.length])],
+            equipment: ['mat'],
+          }));
+        }
+        // Three one-exercise complexes: today, tomorrow and the day after.
+        for (const exercise of activeCategory().exercises) {
+          createComplexFromExercises([exercise.id], activeCategory().complexes.length);
+        }
       }
       setActiveCategory(home);
     }

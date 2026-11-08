@@ -66,6 +66,10 @@ let frameByExercise = new Map();
 let drag = null;
 let settleTimer = null;
 
+// The day the current Complex_list belongs to, so render() knows whether the
+// list it is replacing is the same list (keep its scroll) or another day's.
+let renderedDay = null;
+
 let root = null;
 let onNavigate = null;
 
@@ -244,6 +248,14 @@ function render() {
   }
   if (card) previewIndex = Math.min(previewIndex, Math.max(0, card.exercises.length - 1));
 
+  // A render rebuilds Complex_list, which would send it back to the top - so a
+  // tap on a complex lower down threw the list back under the finger. Its scroll
+  // is carried across, as the schedule page does (gotcha 12). Only for the same
+  // day: a different day is a different list, and starts at its top.
+  const oldList = root.querySelector('.complex-list--workout');
+  const keepScroll = oldList && renderedDay === day.offset ? oldList.scrollTop : 0;
+  renderedDay = day.offset;
+
   stopAnimations();
   // Everything a gesture in flight is holding belongs to the render about to be
   // thrown away, so it cannot survive one.
@@ -265,6 +277,11 @@ function render() {
       )
     )
   );
+
+  if (keepScroll) {
+    const list = root.querySelector('.complex-list--workout');
+    if (list) list.scrollTop = keepScroll;
+  }
 
   startAnimations(card);
 }
