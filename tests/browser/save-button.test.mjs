@@ -1,10 +1,10 @@
-// «Обновить» in real Chrome: where it sits, that it is a main-button with a
-// clean icon, that Ctrl+S drives it and the browser's own Ctrl+S is
-// suppressed, and the three states an upload goes through - with the "leave
-// site?" guard held while one is in flight.
+// «Обновить» in real Chrome: where it sits, its three looks (default, hover,
+// done), «Добавить» beside it, that Ctrl+S drives it and the browser's own
+// Ctrl+S is suppressed, and that the upload runs on behind the 1.5-second
+// «Обновлено» - with the "leave site?" guard held while it is in flight.
 //
 // The page's fetch is replaced by a fake GitHub that can hold the final ref
-// update open, so the busy state stays put long enough to look at. Nothing
+// update open, so the upload stays in flight long enough to look at. Nothing
 // here reaches the network.
 
 import puppeteer from 'puppeteer-core';
@@ -34,20 +34,38 @@ const geometry = () => page.evaluate(() => {
   const b = document.querySelector('.categories .save-button');
   if (!b) return null;
   const r = b.getBoundingClientRect();
-  const row = document.querySelector('.categories').getBoundingClientRect();
   const list = document.querySelector('.categories .category-list').getBoundingClientRect();
-  const s = getComputedStyle(b);
   return {
     right: window.innerWidth - r.right, centreDy: Math.abs((r.top + r.height / 2) - (list.top + list.height / 2)),
     lastInRow: b === document.querySelector('.categories').lastElementChild,
-    height: r.height, width: r.width, bg: s.backgroundColor, radius: s.borderRadius,
-    rowRight: window.innerWidth - row.right,
     label: b.querySelector('.save-button__label').textContent,
-    gap: b.querySelector('.save-button__label').getBoundingClientRect().left
-      - b.querySelector('.save-button__icon').getBoundingClientRect().right,
-    padRight: r.right - b.querySelector('.save-button__label').getBoundingClientRect().right,
-    status: b.dataset.status,
   };
+});
+
+const look = () => page.evaluate(() => {
+  const b = document.querySelector('.save-button');
+  const s = getComputedStyle(b);
+  const icon = b.querySelector('.save-button__icon');
+  const label = b.querySelector('.save-button__label');
+  const r = b.getBoundingClientRect();
+  const ir = icon.getBoundingClientRect();
+  const lr = label.getBoundingClientRect();
+  const is = getComputedStyle(icon);
+  return {
+    width: r.width, height: r.height, radius: s.borderRadius,
+    bg: s.backgroundColor, border: s.borderTopWidth + ' ' + s.borderTopColor, color: s.color,
+    iconLeft: ir.left - r.left, iconW: ir.width, iconH: ir.height, iconBg: is.backgroundColor,
+    gap: lr.left - ir.right, label: label.textContent, labelRight: r.right - lr.right,
+    mask: is.maskImage || is.webkitMaskImage, status: b.dataset.status,
+  };
+});
+
+const shoot = async (name, selector = '.save-button') => page.screenshot({
+  path: OUT + '/' + name + '.png',
+  clip: await page.$eval(selector, (n) => {
+    const r = n.getBoundingClientRect();
+    return { x: r.left - 6, y: r.top - 6, width: r.width + 12, height: r.height + 12 };
+  }),
 });
 
 // ============================================================
@@ -72,57 +90,84 @@ for (const [name, query] of [
 }
 
 // ============================================================
-// 2. it is a main-button, and its icon is clean
+// 2. the default look, the hover look, and «Добавить» beside it
 // ============================================================
 
 await page.goto(harness('seed=exercises&complexes=2,1,1'), { waitUntil: 'networkidle2' });
 await page.waitForSelector('.save-button');
 await wait(200);
 
-const looks = await page.evaluate(async () => {
-  const save = document.querySelector('.save-button');
-  const add = document.querySelector('.main-button:not(.save-button)');
-  const a = getComputedStyle(save);
-  const b = getComputedStyle(add);
-  const icon = save.querySelector('.save-button__icon');
-  await icon.decode().catch(() => {});
-  // The export carried two opaque background rectangles. Drawn to a canvas, a
-  // clean icon is transparent in its corner; the export would be #1E1E1E.
-  const c = document.createElement('canvas');
-  c.width = 13; c.height = 12;
-  const ctx = c.getContext('2d');
-  ctx.drawImage(icon, 0, 0, 13, 12);
-  const corner = ctx.getImageData(0, 0, 1, 1).data[3];
-  const arrow = ctx.getImageData(6, 2, 1, 1).data; // on the arrow's shaft
-  return {
-    same: ['height', 'borderRadius', 'backgroundColor', 'paddingLeft', 'gap', 'fontSize', 'color']
-      .every((k) => a[k] === b[k]),
-    diff: ['height', 'borderRadius', 'backgroundColor', 'paddingLeft', 'gap', 'fontSize', 'color']
-      .filter((k) => a[k] !== b[k]).map((k) => k + ':' + a[k] + '/' + b[k]),
-    loaded: icon.naturalWidth > 0, iconW: icon.getBoundingClientRect().width,
-    corner, arrow: Array.from(arrow),
-  };
+let l = await look();
+check('2: 97 x 24, radius 6', l.width === 97 && l.height === 24 && l.radius === '6px', JSON.stringify(l));
+check('2: default: #1D1D1D ground, 1px #525252 border', l.bg === 'rgb(29, 29, 29)'
+  && l.border === '1px rgb(82, 82, 82)', JSON.stringify(l));
+check('2: default: white text and icon', l.color === 'rgb(255, 255, 255)'
+  && l.iconBg === 'rgb(255, 255, 255)', JSON.stringify(l));
+check('2: 6px padding inside the 1px border, so the icon starts at 7', Math.abs(l.iconLeft - 7) < 0.5, l.iconLeft);
+check('2: icon 13x12, then 6px, then «Обновить»',
+  l.iconW === 13 && l.iconH === 12 && Math.abs(l.gap - 6) < 0.5 && l.label === 'Обновить', JSON.stringify(l));
+check('2: the icon is reset_icon', /reset_icon\.svg/.test(l.mask), l.mask);
+await shoot('save-button-default');
+
+// The icon files are used as masks, so a leftover opaque background in them
+// would turn the icon into a solid square.
+const clean = await page.evaluate(async () => {
+  const out = {};
+  for (const name of ['reset_icon', 'done_icon']) {
+    const img = new Image();
+    img.src = 'assets/icons/' + name + '.svg';
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = 13; c.height = 12;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, 13, 12);
+    const d = ctx.getImageData(0, 0, 13, 12).data;
+    let opaque = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 128) opaque += 1;
+    out[name] = { corner: d[3], opaque };
+  }
+  return out;
 });
-check('2: styled exactly like the «Добавить» main-button', looks.same, looks.diff.join(' '));
-const rest = await geometry();
-check('2: at rest it is laid out like one too: icon, 7px, label, 6px',
-  Math.abs(rest.gap - 7) < 0.5 && Math.abs(rest.padRight - 6) < 0.5, JSON.stringify(rest));
-check('2: the icon loads, 13px wide', looks.loaded && looks.iconW === 13, JSON.stringify(looks));
-check('2: NO DARK SQUARE behind the icon', looks.corner === 0, looks.corner);
-check('2: and the arrow itself is white', looks.arrow[0] > 240 && looks.arrow[3] > 200,
-  looks.arrow.join(','));
-await page.screenshot({ path: OUT + '/save-button-close.png',
-  clip: await page.$eval('.save-button', (n) => {
-    const r = n.getBoundingClientRect();
-    return { x: r.left - 6, y: r.top - 6, width: r.width + 12, height: r.height + 12 };
-  }) });
+check('2: NEITHER ICON CARRIES A BACKGROUND (corners transparent, glyph only)',
+  Object.values(clean).every((v) => v.corner === 0 && v.opaque > 10 && v.opaque < 120), JSON.stringify(clean));
+
+const box = await page.$eval('.save-button', (n) => {
+  const r = n.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+});
+await page.mouse.move(box.x, box.y);
+await wait(100);
+l = await look();
+check('2: hover: white ground and border, black text and icon',
+  l.bg === 'rgb(255, 255, 255)' && l.border === '1px rgb(255, 255, 255)'
+  && l.color === 'rgb(0, 0, 0)' && l.iconBg === 'rgb(0, 0, 0)', JSON.stringify(l));
+check('2: hover moves nothing', Math.abs(l.iconLeft - 7) < 0.5 && l.width === 97, JSON.stringify(l));
+await shoot('save-button-hover');
+await page.mouse.move(10, 400);
+await wait(100);
+
+const add = await page.evaluate(() => {
+  const b = document.querySelector('.exercise-toolbar .main-button');
+  const s = getComputedStyle(b);
+  const r = b.getBoundingClientRect();
+  const icon = b.querySelector('.main-button__icon').getBoundingClientRect();
+  const text = [...b.childNodes].find((n) => n.nodeType === 3 || (n.nodeType === 1 && n.tagName !== 'IMG'));
+  const range = document.createRange();
+  range.selectNodeContents(text);
+  const t = range.getBoundingClientRect();
+  return { padL: s.paddingLeft, padR: s.paddingRight, gap: s.columnGap,
+    iconLeft: icon.left - r.left, textGap: t.left - icon.right, textRight: r.right - t.right };
+});
+check('2: «Добавить»: 6px padding, 6px between icon and text',
+  add.padL === '6px' && add.padR === '6px' && add.gap === '6px'
+  && Math.abs(add.iconLeft - 6) < 0.5 && Math.abs(add.textGap - 6) < 0.5 && Math.abs(add.textRight - 6) < 0.5,
+  JSON.stringify(add));
+await shoot('save-button-add', '.exercise-toolbar .main-button');
 
 // ============================================================
-// 3. Ctrl+S: the browser's own is suppressed, the button's runs
+// 3. Ctrl+S, and the done look
 // ============================================================
 
-// The harness loads nothing from a repo, so an upload is refused - which is
-// exactly what shows the shortcut reached the button.
 const prevented = await page.evaluate(() => {
   window.__ctrlS = null;
   window.addEventListener('keydown', (e) => {
@@ -133,17 +178,26 @@ const prevented = await page.evaluate(() => {
 await page.keyboard.down('Control');
 await page.keyboard.press('KeyS');
 await page.keyboard.up('Control');
-await wait(300);
+await wait(100);
 check('3: CTRL+S IS PREVENTED - no "save page" dialog',
   prevented && (await page.evaluate(() => window.__ctrlS)) === true,
   await page.evaluate(() => window.__ctrlS));
-let g = await geometry();
-check('3: and it ran the button: refused, and says so', g.status === 'error' && g.label === 'Не сохранено',
-  JSON.stringify(g));
-check('3: the refusal is red', g.bg === 'rgb(255, 69, 58)', g.bg);
-check('3: the reason is in its title',
-  (await page.$eval('.save-button', (n) => n.title)).includes('нет токена'),
-  await page.$eval('.save-button', (n) => n.title));
+l = await look();
+check('3: and it pressed the button: «Обновлено» at once', l.status === 'done' && l.label === 'Обновлено',
+  JSON.stringify(l));
+check('3: done: white ground and border, black text and icon', l.bg === 'rgb(255, 255, 255)'
+  && l.border === '1px rgb(255, 255, 255)' && l.color === 'rgb(0, 0, 0)' && l.iconBg === 'rgb(0, 0, 0)',
+  JSON.stringify(l));
+check('3: done: the tick (done_icon)', /done_icon\.svg/.test(l.mask), l.mask);
+check('3: «Обновлено» fits in the 97px, 6px from the icon',
+  l.width === 97 && Math.abs(l.gap - 6) < 0.5 && l.labelRight >= 1, JSON.stringify(l));
+await shoot('save-button-done');
+await wait(1200);
+check('3: still done at 1.3s', (await look()).status === 'done');
+await wait(400);
+l = await look();
+check('3: back to «Обновить» after 1.5s', l.status === 'idle' && l.label === 'Обновить'
+  && l.bg === 'rgb(29, 29, 29)', JSON.stringify(l));
 
 // Ctrl+S from inside the date field commits what was typed first.
 await page.click('.input--date');
@@ -155,9 +209,10 @@ await wait(300);
 check('3: CTRL+S INSIDE A FIELD COMMITS THE FIELD FIRST',
   await page.evaluate(async () => /-10-15$/.test((await import('/js/store.js')).activeCategory().scheduleStartDate)),
   await page.evaluate(async () => (await import('/js/store.js')).activeCategory().scheduleStartDate));
+await wait(2000);
 
 // ============================================================
-// 4. a real upload, held mid-flight: busy, guarded, then confirmed
+// 4. a real upload, held mid-flight: it goes on behind the button
 // ============================================================
 
 await page.evaluate(async () => {
@@ -202,43 +257,34 @@ await page.evaluate(async () => {
 });
 await wait(250);
 
+const held = () => page.evaluate(() => {
+  const e = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(e);
+  return e.defaultPrevented;
+});
+
 await page.click('.save-button');
-await wait(300);
-g = await geometry();
-check('4: while it uploads it says «Сохраняю…»', g.status === 'busy' && g.label === 'Сохраняю…',
-  JSON.stringify(g));
-check('4: the icon is animated', await page.$eval('.save-button__icon',
-  (n) => getComputedStyle(n).animationName) === 'save-button-pulse');
-check('4: it stays anchored at the right edge', Math.abs(g.right - 16) <= 1, g.right);
-check('4: CLOSING OR RELOADING NOW ASKS FIRST (beforeunload is held)',
-  await page.evaluate(() => {
-    const e = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(e);
-    return e.defaultPrevented;
-  }));
-check('4: nothing has been confirmed yet', (await page.evaluate(() => window.__commits)) === 0);
-await page.screenshot({ path: OUT + '/save-button-busy.png', clip: { x: 1300, y: 0, width: 200, height: 50 } });
+await wait(50);
+l = await look();
+check('4: the press shows «Обновлено» at once, before GitHub has answered',
+  l.status === 'done' && (await page.evaluate(() => window.__commits)) === 0, JSON.stringify(l));
+await wait(250);
+check('4: CLOSING OR RELOADING NOW ASKS FIRST (beforeunload is held)', await held());
+await wait(1400);
+l = await look();
+check('4: after 1.5s it reads «Обновить» again, though the upload is still held',
+  l.status === 'idle' && (await page.evaluate(() => window.__commits)) === 0, JSON.stringify(l));
+check('4: and the tab is still held meanwhile', await held());
 
 await page.evaluate(() => window.__release());
-await wait(400);
-g = await geometry();
-check('4: ONLY AFTER GITHUB CONFIRMS does it say «Сохранено»',
-  g.status === 'done' && g.label === 'Сохранено' && (await page.evaluate(() => window.__commits)) >= 1,
-  JSON.stringify(g));
-check('4: the leave-site guard is released',
-  await page.evaluate(() => {
-    const e = new Event('beforeunload', { cancelable: true });
-    window.dispatchEvent(e);
-    return !e.defaultPrevented;
-  }));
+await page.evaluate(async () => { await (await import('/js/save-button.js')).saveInFlight(); });
+await wait(100);
+check('4: the upload lands', (await page.evaluate(() => window.__commits)) >= 1);
+check('4: the leave-site guard is released', !(await held()));
 check('4: nothing is left pending',
   await page.evaluate(async () => !(await import('/js/sync.js')).hasPendingChanges(
     (await import('/js/store.js')).getState())));
-await page.screenshot({ path: OUT + '/save-button-done.png', clip: { x: 1300, y: 0, width: 200, height: 50 } });
-
-await wait(2700);
-g = await geometry();
-check('4: and then reads «Обновить» again', g.status === 'idle' && g.label === 'Обновить', JSON.stringify(g));
+check('4: and the button did not change when it landed', (await look()).status === 'idle');
 
 check('no page errors', errs.length === 0, errs.join(' | '));
 

@@ -201,8 +201,16 @@ already durable in localStorage), runs the same `flushOps`/`flushStructure`
 the idle flush uses, loops while anything changed meanwhile, and resolves only
 when nothing is pending — GitHub's answer to the ref update is the
 confirmation. It rejects with a `reason` (`token`, `unloaded`, `offline`,
-`incomplete`) or GitHub's error, and the button turns red with the reason in
-its title; it says «Сохранено» only after a confirmed commit.
+`incomplete`) or GitHub's error.
+**The button does NOT report that result — by the user's design.** It has
+three looks only: default (`#1D1D1D`, `--stroke` border, white), hover and
+done (white ground and border, black). Done — «Обновлено» with the tick —
+comes up **the moment it is pressed** and goes back after 1.5s (`DONE_MS`),
+whatever the upload is doing; a failure goes to the console and is retried by
+the next idle flush or launch ("recover silently, show no error indicators").
+Fixed at 97px, the width «Обновлено» needs, and the 1px border is kept in every
+state (only its colour changes) so nothing shifts. The `reset_button_*.svg`
+exports are references for those three looks, not used by the app.
 **No browser can finish a multi-request upload after its tab is gone**
 (`sendBeacon` cannot send the Authorization header, `keepalive` covers one
 request, not blobs → tree → commit → ref), so "close the tab right after
@@ -215,9 +223,11 @@ mounting. Any other repo state means the repo moved on (the upload landed,
 later saves did, another device wrote), and the snapshot is dropped, never
 written over newer data. The button blurs the focused element and waits two
 ticks first, so Ctrl+S inside the date field saves what was typed (gotcha 15's
-deferred commit). The icon is `resetr_icon.svg` — a cleaned, ASCII-named copy
-of the export `resetr_iсon.svg` (Cyrillic «с»), which carried two opaque
-background rectangles from the Figma frame. On a phone the workout page hides
+deferred commit). The icons are `reset_icon.svg` and `done_icon.svg`, painted
+as a **CSS mask over `currentColor`** so one file is white or black with the
+text. Their exports carried two opaque background rectangles from the Figma
+frame, which a mask turns into a solid square — they were stripped, and
+`browser/save-button` counts the opaque pixels to keep it so. On a phone the workout page hides
 its header, so the button is not there. `jsdom/sync` section 10 and
 `browser/save-button` cover it.
 **This is not "durable staging for structural writes"** (the next item on the

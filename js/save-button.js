@@ -1,31 +1,34 @@
-// «Обновить»: send everything pending to the data repo now, and say when GitHub
-// has confirmed it. Ctrl+S does the same from anywhere in the app.
+// «Обновить»: send everything pending to the data repo now. Ctrl+S does the
+// same from anywhere in the app.
 //
 // The idle flush in js/sync.js is untouched and goes on working on its own;
-// this is the explicit, confirmed version of it. See forceSync() for what
-// "everything" means and why success can be trusted, and js/staging.js for
-// why closing the tab mid-upload loses nothing.
+// this is the explicit version of it. See forceSync() for what "everything"
+// means, and js/staging.js for why closing the tab mid-upload loses nothing.
+//
+// Three looks, by the user's design: default, hover (CSS alone) and done.
+// Done - «Обновлено» on white with a tick - comes up THE MOMENT the button is
+// pressed and goes back after DONE_MS, whatever the upload is doing. It is an
+// acknowledgement of the press, not a report from GitHub: the upload goes on
+// behind it, holds the tab while it runs, and was staged durably before it
+// began. A failure is logged to the console and nothing else - the next launch
+// or the next idle flush retries it, which is the "recover silently, show no
+// error indicators" the user asked for.
 //
 // The button is rebuilt with every header render, so its status lives here, at
-// module level, and a change of status repaints the buttons in place rather
-// than re-rendering the page under whatever the user is doing.
+// module level, and a change repaints the buttons in place rather than
+// re-rendering the page under whatever the user is doing.
 
 import { el } from './dom.js';
 import { getState } from './store.js';
 import { forceSync } from './sync.js';
 
-// How long «Сохранено» stays before the button reads «Обновить» again.
-const DONE_MS = 2500;
+// How long «Обновлено» stays before the button reads «Обновить» again.
+export const DONE_MS = 1500;
 
-const LABELS = {
-  idle: 'Обновить',
-  busy: 'Сохраняю…',
-  done: 'Сохранено',
-  error: 'Не сохранено',
-};
+const LABELS = { idle: 'Обновить', done: 'Обновлено' };
+const TITLE = 'Отправить все изменения в репозиторий (Ctrl+S)';
 
 let status = 'idle';
-let detail = '';
 let doneTimer = null;
 let inFlight = null;
 
@@ -35,12 +38,12 @@ export function renderSaveButton() {
     {
       class: 'main-button save-button',
       type: 'button',
-      title: 'Отправить все изменения в репозиторий (Ctrl+S)',
+      title: TITLE,
       onClick: () => { saveNow(); },
     },
-    el('img', { class: 'main-button__icon save-button__icon', src: 'assets/icons/resetr_icon.svg', alt: '' }),
-    // One label, exactly like any main-button. The width follows the text;
-    // the button is anchored at the right, so only its left edge moves.
+    // A mask over currentColor (see the CSS), so the icon follows the text
+    // from white to black - and to the tick when done.
+    el('span', { class: 'main-button__icon save-button__icon', 'aria-hidden': 'true' }),
     el('span', { class: 'save-button__label' })
   );
   paint(button);
@@ -50,15 +53,10 @@ export function renderSaveButton() {
 function paint(button) {
   button.dataset.status = status;
   button.querySelector('.save-button__label').textContent = LABELS[status];
-  button.setAttribute('aria-busy', status === 'busy' ? 'true' : 'false');
-  button.title = status === 'error'
-    ? detail + ' Нажмите, чтобы попробовать снова.'
-    : 'Отправить все изменения в репозиторий (Ctrl+S)';
 }
 
-function setStatus(next, why = '') {
+function setStatus(next) {
   status = next;
-  detail = why;
   if (doneTimer !== null) { clearTimeout(doneTimer); doneTimer = null; }
   if (next === 'done') doneTimer = setTimeout(() => setStatus('idle'), DONE_MS);
   for (const button of document.querySelectorAll('.save-button')) paint(button);
@@ -66,17 +64,18 @@ function setStatus(next, why = '') {
 
 // While the upload is in flight, closing or reloading the tab asks first. If
 // the user leaves anyway nothing is lost - the structure was staged before the
-// upload began and the next launch finishes it - but asking is what lets the
-// promise "it is done when it says so" hold in the ordinary case.
+// upload began and the next launch finishes it.
 function holdTheTab(event) {
   event.preventDefault();
   event.returnValue = '';
   return '';
 }
 
-// One upload at a time: a second click or Ctrl+S while one is running waits for
-// that one rather than starting another.
+// Every press shows «Обновлено» for its full two seconds. The upload itself
+// is one at a time: a press while one is running waits for that one rather
+// than starting another.
 export function saveNow() {
+  setStatus('done');
   if (inFlight) return inFlight;
   inFlight = run().finally(() => { inFlight = null; });
   return inFlight;
@@ -91,26 +90,14 @@ async function run() {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
 
-  setStatus('busy');
   window.addEventListener('beforeunload', holdTheTab);
   try {
     await forceSync(getState());
-    setStatus('done');
   } catch (error) {
-    console.warn('«Обновить» failed:', error);
-    setStatus('error', describe(error));
+    console.warn('«Обновить» did not finish:', error);
   } finally {
     window.removeEventListener('beforeunload', holdTheTab);
   }
-}
-
-function describe(error) {
-  if (error && error.reason) return error.message;
-  if (error && (error.status === 401 || error.status === 403)) {
-    return 'GitHub отклонил токен: он истёк или у него нет прав на запись.';
-  }
-  if (error instanceof TypeError) return 'Нет связи с GitHub.';
-  return 'GitHub ответил ошибкой: ' + String((error && error.message) || error).slice(0, 160);
 }
 
 // Ctrl+S (Cmd+S on a Mac) from anywhere, matched on the physical key so it
@@ -134,6 +121,10 @@ export function resetSaveButton() {
   if (doneTimer !== null) clearTimeout(doneTimer);
   doneTimer = null;
   status = 'idle';
-  detail = '';
   inFlight = null;
+}
+
+// For the tests: whether an upload is still running.
+export function saveInFlight() {
+  return inFlight;
 }

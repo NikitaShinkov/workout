@@ -601,7 +601,7 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
   height: 24px;
   padding: 0 6px;
   border: 0;
@@ -618,30 +618,40 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   height: 12px;
 }
 
-/* «Обновить» (js/save-button.js): a main-button at the right-hand end of the
-   categories row, on every page that has one. */
+/* «Обновить» (js/save-button.js), at the right-hand end of the categories row
+   on every page that has one. Fixed at 97px, the width «Обновлено» needs, so
+   the label can change without the button moving. The 1px border is there in
+   every state - only its colour changes - so the contents never shift.
+   The icon is a mask over currentColor: one file, white or black with the
+   text. */
 .save-button {
+  box-sizing: border-box;
+  width: 97px;
+  justify-content: flex-start;
   margin-left: auto;
   margin-right: 16px;
+  border: 1px solid var(--stroke);
+  background: var(--hover-bg);
+  color: #fff;
 }
 
-.save-button[data-status="busy"] {
-  cursor: progress;
+.save-button__icon {
+  flex-shrink: 0;
+  background: currentColor;
+  -webkit-mask: url('../assets/icons/reset_icon.svg') center / 13px 12px no-repeat;
+  mask: url('../assets/icons/reset_icon.svg') center / 13px 12px no-repeat;
 }
 
-.save-button[data-status="busy"] .save-button__icon {
-  animation: save-button-pulse 0.8s ease-in-out infinite alternate;
+body:not(.hover-off) .save-button:hover,
+.save-button[data-status="done"] {
+  border-color: #fff;
+  background: #fff;
+  color: #000;
 }
 
-@keyframes save-button-pulse {
-  from { transform: translateY(1px); opacity: 1; }
-  to { transform: translateY(-2px); opacity: 0.45; }
-}
-
-/* It could not be sent: said plainly, in the colour the app uses for "hard",
-   and it stays until the next attempt. */
-.save-button[data-status="error"] {
-  background: var(--hard);
+.save-button[data-status="done"] .save-button__icon {
+  -webkit-mask-image: url('../assets/icons/done_icon.svg');
+  mask-image: url('../assets/icons/done_icon.svg');
 }
 
 /* ---------- exercise list ---------- */
