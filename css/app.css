@@ -343,10 +343,26 @@ p, span, label, button, a, h1, h2, h3, h4, h5, h6 {
   background-image: url("../assets/icons/add-category-active.svg");
 }
 
-/* Undo_button - offered for 5s after a category is deleted. Empty most of the
-   time, so it takes no space in the row. */
+/* Undo_button - offered for 5s after a category, exercises or complexes are
+   deleted. It floats OVER the categories row, centred on the window rather
+   than on the row: the row starts 16px in (.header's padding), hence the
+   calc. Out of flow, so it takes no space and moves nothing. */
+.categories {
+  position: relative;
+}
+
 .undo-slot {
-  display: contents;
+  position: absolute;
+  top: 50%;
+  left: calc(50vw - 16px);
+  transform: translate(-50%, -50%);
+  z-index: 5;
+  display: flex;
+  pointer-events: none;
+}
+
+.undo-slot > * {
+  pointer-events: auto;
 }
 
 .undo-button {

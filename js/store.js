@@ -283,14 +283,107 @@ export function updateExercise(id, fields, categoryId) {
   });
 }
 
+// Returns a removal record for restoreRemoved(), or null if nothing went.
 export function deleteExercises(ids) {
   const doomed = new Set(ids);
-  update((draft) => {
-    const category = draft.categories[draft.ui.activeCategory];
-    if (!category) return;
+  return removeFromCategory((category) => {
     category.exercises = category.exercises.filter((e) => !doomed.has(e.id));
     // Scheduled copies point at the exercise, so they go with it.
     dropItems(category, (item) => doomed.has(item.exerciseId));
+  });
+}
+
+// --- undoing a deletion ----------------------------------------------------
+//
+// A deletion is recorded as exactly what it took out - each exercise, each
+// whole complex, each item from a complex that survived - with the position it
+// had. Not a snapshot of the lists: undoing one deletion must not roll back
+// anything else done in the meantime, including another deletion that has
+// already become permanent.
+
+function removeFromCategory(mutator) {
+  let removed = null;
+
+  update((draft) => {
+    const categoryId = draft.ui.activeCategory;
+    const category = draft.categories[categoryId];
+    if (!category) return;
+
+    const exercisesBefore = category.exercises.slice();
+    const complexesBefore = category.complexes.map((complex) => ({
+      complex,
+      items: complex.items.slice(),
+    }));
+
+    mutator(category);
+
+    const liveExercises = new Set(category.exercises.map((e) => e.id));
+    const exercises = exercisesBefore
+      .map((exercise, index) => ({ exercise, index }))
+      .filter(({ exercise }) => !liveExercises.has(exercise.id));
+
+    const complexes = [];
+    const items = [];
+    complexesBefore.forEach(({ complex, items: before }, index) => {
+      if (!category.complexes.includes(complex)) {
+        complexes.push({ complex: { ...complex, items: before }, index });
+        return;
+      }
+      const live = new Set(complex.items.map((item) => item.id));
+      before.forEach((item, itemIndex) => {
+        if (!live.has(item.id)) items.push({ complexId: complex.id, item, index: itemIndex });
+      });
+    });
+
+    if (exercises.length || complexes.length || items.length) {
+      removed = { categoryId, exercises, complexes, items };
+    }
+  });
+
+  return removed;
+}
+
+// Put back everything a removal record took out, each at the position it came
+// from, ascending so earlier insertions make room for later ones exactly as
+// they stood. Anything that has come back already is skipped, and an item whose
+// exercise has since gone for good stays gone. The category is made active so
+// what was restored is on screen.
+export function restoreRemoved(removed) {
+  if (!removed) return;
+
+  update((draft) => {
+    const category = draft.categories[removed.categoryId];
+    if (!category) return;
+
+    for (const { exercise, index } of removed.exercises) {
+      if (category.exercises.some((e) => e.id === exercise.id)) continue;
+      category.exercises.splice(clampIndex(index, category.exercises.length), 0, exercise);
+    }
+
+    const live = new Set(category.exercises.map((e) => e.id));
+    const keep = (item) => live.has(item.exerciseId);
+
+    for (const { complex, index } of removed.complexes) {
+      if (category.complexes.some((c) => c.id === complex.id)) continue;
+      const back = { ...complex, items: complex.items.filter(keep) };
+      if (back.items.length === 0) continue;
+      category.complexes.splice(clampIndex(index, category.complexes.length), 0, back);
+    }
+
+    for (const { complexId, item, index } of removed.items) {
+      if (!keep(item)) continue;
+      const complex = category.complexes.find((c) => c.id === complexId);
+      // Its complex has gone since - emptied by a later deletion, say - so the
+      // item comes back as a complex of its own rather than not at all.
+      if (!complex) {
+        category.complexes.push({ ...createComplex(), items: [item] });
+        continue;
+      }
+      if (complex.items.some((i) => i.id === item.id)) continue;
+      complex.items.splice(clampIndex(index, complex.items.length), 0, item);
+    }
+
+    draft.ui.activeCategory = removed.categoryId;
   });
 }
 
@@ -551,14 +644,15 @@ export function moveItemsToNewComplex(itemIds, insertIndex) {
   });
 }
 
+// Both return a removal record for restoreRemoved(), or null.
 export function deleteComplexItems(itemIds) {
   const doomed = new Set(itemIds);
-  withCategory((category) => dropItems(category, (item) => doomed.has(item.id)));
+  return removeFromCategory((category) => dropItems(category, (item) => doomed.has(item.id)));
 }
 
 export function deleteComplexes(complexIds) {
   const doomed = new Set(complexIds);
-  withCategory((category) => {
+  return removeFromCategory((category) => {
     category.complexes = category.complexes.filter((complex) => !doomed.has(complex.id));
   });
 }

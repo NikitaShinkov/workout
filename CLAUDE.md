@@ -636,8 +636,25 @@ else.
 - Category close button (X) appears only on the **second** hover after a
   category is opened. Clicking, adding, deleting and restoring all disarm it, so
   the X never lands under the cursor that just clicked.
-- Deleting a category hides it and holds the record 5s behind an undo button /
-  `Ctrl+Z`; deletions stack newest-first with independent timers.
+- **Every deletion on the schedule page can be undone for 5s** — a category,
+  and Del on exercises in Exercise_list, blocks inside complexes or whole
+  complexes, one or many. One stack for all of them (`offerUndo()`), newest
+  first, independent timers, the undo button and `Ctrl+Z`. The label is
+  «Восстановить <название>» for one exercise or block, «Восстановить
+  упражнения» for several, «Восстановить комплекс» / «…комплексы». A category
+  or exercise name longer than 20 characters is cut to 20 plus «...»
+  (`shortName()`), so a long name cannot stretch the button.
+  `deleteExercises` / `deleteComplexItems` / `deleteComplexes` return a
+  **removal record** — each exercise, whole complex and stray item that went,
+  with its position — and `restoreRemoved()` puts exactly those back,
+  ascending, skipping anything already back. Not a snapshot of the lists:
+  undoing one deletion must not roll back anything done since, nor a deletion
+  that has already gone permanent. It reopens the category it happened in.
+  `jsdom/undo-drag` section 5 covers it.
+- **The undo button floats over the categories row, centred on the window**
+  (`.undo-slot`: absolute, `left: calc(50vw - 16px)` because the row starts at
+  the header's 16px padding). Out of flow, so it moves nothing; `pointer-events`
+  only on the button. `browser/hover-undo` measures it.
 - Menu button width is fixed by an invisible sizer span carrying the **saved**
   name — that is what keeps it steady on hover and while typing a longer name.
 - Store state is version 2. `migrate()` in `js/store.js` upgrades version-1

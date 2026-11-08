@@ -21,6 +21,7 @@ import {
   renameCategory,
   deleteCategory,
   restoreCategory,
+  restoreRemoved,
   reorderCategories,
   createComplexFromExercises,
   addExercisesToComplex,
@@ -100,8 +101,9 @@ let editingCategoryId = null;
 // never appears under a cursor that is only still there because it just clicked.
 let activeHoverArmed = true;
 
-// Categories awaiting permanent deletion, oldest first. Each keeps its own
-// timer, and the newest is the one the undo button offers.
+// Deletions awaiting permanence - categories, exercises, complexes - oldest
+// first. Each keeps its own timer, and the newest is the one the undo button
+// offers.
 const UNDO_SECONDS = 5;
 let pendingDeletions = [];
 let undoTicker = null;
@@ -535,7 +537,7 @@ function onDocumentKeydown(event) {
   const tag = event.target.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return; // do not eat edits in fields
 
-  // Ctrl+Z restores the most recently deleted category. Checked after the field
+  // Ctrl+Z restores the most recent deletion. Checked after the field
   // guard above so it never steals undo from a text field.
   if ((event.ctrlKey || event.metaKey) && event.code === 'KeyZ' && pendingDeletions.length > 0) {
     event.preventDefault();
@@ -580,12 +582,15 @@ function onDocumentKeydown(event) {
     event.preventDefault();
 
     const doomed = orderedSelection();
-    if (selection.scope === 'library') deleteExercises(doomed);
-    else if (selection.scope === 'item') deleteComplexItems(doomed);
-    else if (selection.scope === 'complex') deleteComplexes(doomed);
+    const label = deletionLabel(selection.scope, doomed);
+    let removed = null;
+    if (selection.scope === 'library') removed = deleteExercises(doomed);
+    else if (selection.scope === 'item') removed = deleteComplexItems(doomed);
+    else if (selection.scope === 'complex') removed = deleteComplexes(doomed);
 
     clearSelection();
     render();
+    if (removed) offerUndo(label, () => restoreRemoved(removed));
   }
 }
 
@@ -958,7 +963,12 @@ function renderHeader(state) {
   );
 }
 
-// --- deleting a category, with an undo window ------------------------------
+// --- deleting, with an undo window -----------------------------------------
+//
+// A category, exercises from Exercise_list, blocks inside complexes and whole
+// complexes all go the same way: out of the state at once, with a record kept
+// for UNDO_SECONDS behind the undo button and Ctrl+Z. One stack for all four,
+// newest first, each with its own timer.
 
 function requestDeleteCategory(id) {
   // Deleting switches to the next category, and its close button would other-
@@ -969,7 +979,45 @@ function requestDeleteCategory(id) {
   const removed = deleteCategory(id); // hides the button and re-renders
   if (!removed) return;
 
-  const entry = { removed, expiresAt: Date.now() + UNDO_SECONDS * 1000, timer: null };
+  offerUndo('Восстановить ' + shortName(removed.data.name), () => {
+    restoreCategory(removed);
+    activeHoverArmed = false;
+  });
+}
+
+// What the undo button says for a Del in one of the lists - worked out before
+// the deletion, while the names can still be looked up.
+function deletionLabel(scope, ids) {
+  if (scope === 'complex') {
+    return ids.length === 1 ? 'Восстановить комплекс' : 'Восстановить комплексы';
+  }
+  if (ids.length !== 1) return 'Восстановить упражнения';
+
+  const category = activeCategory();
+  if (!category) return 'Восстановить упражнение';
+  let exerciseId = ids[0];
+  if (scope === 'item') {
+    const item = category.complexes.flatMap((c) => c.items).find((i) => i.id === ids[0]);
+    exerciseId = item ? item.exerciseId : null;
+  }
+  const exercise = category.exercises.find((e) => e.id === exerciseId);
+  return exercise && exercise.name ? 'Восстановить ' + shortName(exercise.name) : 'Восстановить упражнение';
+}
+
+// A name in the undo button is cut to UNDO_NAME_MAX characters plus «...», so
+// a long exercise name cannot stretch the button across the row. Counted in
+// code points, so a letter is never split in half; trailing spaces before the
+// dots are dropped.
+const UNDO_NAME_MAX = 20;
+
+export function shortName(name) {
+  const chars = Array.from(String(name));
+  if (chars.length <= UNDO_NAME_MAX) return chars.join('');
+  return chars.slice(0, UNDO_NAME_MAX).join('').trimEnd() + '...';
+}
+
+function offerUndo(label, undo) {
+  const entry = { label, undo, expiresAt: Date.now() + UNDO_SECONDS * 1000, timer: null };
   entry.timer = setTimeout(() => finalizeDeletion(entry), UNDO_SECONDS * 1000);
   pendingDeletions.push(entry);
 
@@ -977,7 +1025,7 @@ function requestDeleteCategory(id) {
   refreshUndoSlot();
 }
 
-// The category is already out of the state; letting the record go is all that
+// The thing is already out of the state; letting the record go is all that
 // makes the deletion permanent.
 function finalizeDeletion(entry) {
   clearTimeout(entry.timer);
@@ -991,8 +1039,7 @@ function undoLastDeletion() {
   if (!entry) return;
 
   clearTimeout(entry.timer);
-  restoreCategory(entry.removed); // re-renders, which rebuilds the undo slot
-  activeHoverArmed = false;
+  entry.undo(); // re-renders, which rebuilds the undo slot
 
   stopUndoTickerIfIdle();
   refreshUndoSlot();
@@ -1029,7 +1076,7 @@ function refreshUndoSlot() {
       { class: 'undo-button', type: 'button', onClick: undoLastDeletion },
       el('img', { class: 'undo-button__icon', src: 'assets/icons/undo.svg', alt: '' }),
       el('span', {
-        text: 'Восстановить ' + entry.removed.data.name + ' (Ctrl+Z) ' + secondsLeft,
+        text: entry.label + ' (Ctrl+Z) ' + secondsLeft,
       })
     )
   );

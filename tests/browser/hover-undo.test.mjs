@@ -145,6 +145,22 @@ check('2: 24px tall, 6px radius, 7px gap',
   u1.height + '/' + u1.radius + '/' + u1.gap);
 check('2: 12x12 icon', u1.iconW === 12, u1.iconW);
 check('2: positioned after the add button', u1.afterAdd === true);
+const place = await page.evaluate(() => {
+  const b = document.querySelector('.undo-button').getBoundingClientRect();
+  const list = document.querySelector('.categories .category-list').getBoundingClientRect();
+  const row = document.querySelector('.categories').getBoundingClientRect();
+  const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+  return {
+    dx: (b.left + b.width / 2) - window.innerWidth / 2,
+    dy: (b.top + b.height / 2) - (list.top + list.height / 2),
+    rowH: row.height,
+    onTop: Boolean(hit && hit.closest('.undo-button')),
+  };
+});
+check('2: CENTRED ON THE WINDOW, horizontally', Math.abs(place.dx) <= 1, JSON.stringify(place));
+check('2: on the category list\'s level', Math.abs(place.dy) <= 1, JSON.stringify(place));
+check('2: overlaid - on top, and the row keeps its height', place.onTop && place.rowH === 26,
+  JSON.stringify(place));
 check('2: the deleted button is hidden', !(await page.evaluate((n) =>
   [...document.querySelectorAll('.menu-button__sizer')].some((s) => s.textContent === n),
   deletedName)));

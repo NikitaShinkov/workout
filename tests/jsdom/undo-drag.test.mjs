@@ -262,6 +262,149 @@ check('4: a cancelled drag still selects the dragged category',
   store.getState().ui.activeCategory === cancelledId, store.getState().ui.activeCategory);
 check('4: the dragging class is cleaned up', $$('.menu-button--dragging').length === 0);
 
+// ---------- 5. Del in the two lists is undoable too ----------
+
+const ex = (id, name) => ({ ...createExercise({ name, description: '', images: [], equipment: ['mat'] }), id });
+const seedLists = () => ({
+  version: 2, categoryOrder: ['u'],
+  categories: { u: {
+    name: 'Тест', scheduleEnabled: true, scheduleStartDate: '2026-09-03', intervalDays: 1,
+    includeWeekends: true,
+    exercises: [ex('e1', 'Первое'), ex('e2', 'Второе'), ex('e3', 'Третье'), ex('e4', 'Четвёртое')],
+    complexes: [
+      { id: 'c1', enabled: true, items: [{ id: 'i1', exerciseId: 'e1' }, { id: 'i2', exerciseId: 'e2' }] },
+      { id: 'c2', enabled: false, items: [{ id: 'i3', exerciseId: 'e3' }] },
+      { id: 'c3', enabled: true, items: [{ id: 'i4', exerciseId: 'e2' }, { id: 'i5', exerciseId: 'e4' }] },
+    ],
+  } },
+  ui: { activeCategory: 'u' },
+});
+const cat = () => store.getState().categories.u;
+const lib = () => cat().exercises.map((e) => e.name).join(',');
+const shape = () => cat().complexes
+  .map((c) => c.id + (c.enabled ? '' : '(off)') + ':' + c.items.map((i) => i.id).join('+')).join(' | ');
+const libRows = () => $$('.column--exercise .exercise-row');
+const cxRows = () => $$('.complex-list .exercise-row');
+const sides = () => $$('.complex__side');
+const del = () => keyOn(document, 'Delete', { key: 'Delete' });
+const undoKey = () => keyOn(document, 'KeyZ', { ctrlKey: true });
+
+store.resetStore(seedLists());
+const LIB = lib();
+const SHAPE = shape();
+check('5: seeded', LIB === 'Первое,Второе,Третье,Четвёртое' && SHAPE === 'c1:i1+i2 | c2(off):i3 | c3:i4+i5', SHAPE);
+
+// One exercise from Exercise_list: it and its scheduled blocks come back.
+click(libRows()[1]);
+del();
+check('5a: Del removed Второе and both its blocks',
+  lib() === 'Первое,Третье,Четвёртое' && shape() === 'c1:i1 | c2(off):i3 | c3:i5', lib() + ' / ' + shape());
+check('5a: the undo button names it', label().startsWith('Восстановить Второе (Ctrl+Z) '), label());
+check('5a: and counts down from 5', /\b5$/.test(label()), label());
+undoKey();
+check('5a: CTRL+Z PUTS IT BACK, IN PLACE', lib() === LIB, lib());
+check('5a: with its blocks back in place in both complexes', shape() === SHAPE, shape());
+check('5a: the undo button is gone', !$('.undo-button'));
+
+// Several exercises - one of them emptying a complex outright.
+click(libRows()[1]);
+click(libRows()[2], { ctrlKey: true });
+del();
+check('5b: Del removed Второе and Третье, and the complex Третье was alone in',
+  lib() === 'Первое,Четвёртое' && shape() === 'c1:i1 | c3:i5', lib() + ' / ' + shape());
+check('5b: «Восстановить упражнения»', label().startsWith('Восстановить упражнения (Ctrl+Z) '), label());
+click($('.undo-button'));
+check('5b: clicking undo restores both, in place', lib() === LIB, lib());
+check('5b: and the emptied complex, switched off as it was', shape() === SHAPE, shape());
+
+// One block inside a complex.
+click(cxRows()[1]); // i2
+del();
+check('5c: Del removed one block', shape() === 'c1:i1 | c2(off):i3 | c3:i4+i5', shape());
+check('5c: the library is untouched', lib() === LIB);
+check('5c: the button names the exercise', label().startsWith('Восстановить Второе (Ctrl+Z) '), label());
+undoKey();
+check('5c: restored in place', shape() === SHAPE, shape());
+
+// Several blocks across complexes, one of them a complex's only block.
+click(cxRows()[0]);                       // i1
+click(cxRows()[2], { shiftKey: true });   // i1..i3
+del();
+check('5d: Del removed three blocks and the complexes they emptied', shape() === 'c3:i4+i5', shape());
+check('5d: «Восстановить упражнения»', label().startsWith('Восстановить упражнения (Ctrl+Z) '), label());
+undoKey();
+check('5d: everything back where it was', shape() === SHAPE, shape());
+
+// One complex, then several.
+click(sides()[1]);
+del();
+check('5e: Del removed the complex', shape() === 'c1:i1+i2 | c3:i4+i5', shape());
+check('5e: «Восстановить комплекс»', label().startsWith('Восстановить комплекс (Ctrl+Z) '), label());
+undoKey();
+check('5e: restored in place, still off', shape() === SHAPE, shape());
+
+click(sides()[0]);
+click(sides()[2], { ctrlKey: true });
+del();
+check('5f: two complexes removed', shape() === 'c2(off):i3', shape());
+check('5f: «Восстановить комплексы»', label().startsWith('Восстановить комплексы (Ctrl+Z) '), label());
+undoKey();
+check('5f: both back in place', shape() === SHAPE, shape());
+
+// The stack is shared, newest first, across all four kinds.
+click(sides()[2]);
+del();                                    // complex c3
+click(libRows()[0]);
+del();                                    // exercise Первое
+check('5g: two deletions pending, the newest offered',
+  label().startsWith('Восстановить Первое (Ctrl+Z) '), label());
+undoKey();
+check('5g: undoing it offers the complex', label().startsWith('Восстановить комплекс (Ctrl+Z) '), label());
+undoKey();
+check('5g: and both are back', lib() === LIB && shape() === SHAPE, lib() + ' / ' + shape());
+
+// Undoing one deletion does not roll back anything done since.
+click(cxRows()[0]);
+del();                                    // block i1
+store.setComplexEnabled('c3', false);     // a later, unrelated change
+undoKey();
+check('5h: undo restores only what was deleted, keeping the later change',
+  shape() === 'c1:i1+i2 | c2(off):i3 | c3(off):i4+i5', shape());
+store.setComplexEnabled('c3', true);
+
+// Undo opens the category the deletion happened in.
+store.resetStore({ ...seedLists(), categoryOrder: ['u', 'v'],
+  categories: { ...seedLists().categories, v: { name: 'Другая', exercises: [], complexes: [] } } });
+click(libRows()[0]);
+del();
+store.setActiveCategory('v');
+undoKey();
+check('5i: undo opens the category the deletion was in, with it restored',
+  store.getState().ui.activeCategory === 'u' && lib() === LIB, store.getState().ui.activeCategory + ' ' + lib());
+
+// What sync writes after an undo is the original structure.
+const { serializeForRepo: serialize } = await mod('sync.js');
+const restoredOut = (await serialize(store.getState())).out;
+store.resetStore({ ...seedLists(), categoryOrder: ['u', 'v'],
+  categories: { ...seedLists().categories, v: { name: 'Другая', exercises: [], complexes: [] } } });
+check('5j: an undone deletion serializes exactly as before it',
+  JSON.stringify(restoredOut) === JSON.stringify((await serialize(store.getState())).out));
+
+// A long name is cut to 20 characters and «...».
+const { shortName } = await mod('schedule-page.js');
+check('5k: a name of 20 characters is kept whole', shortName('А'.repeat(20)) === 'А'.repeat(20));
+check('5k: a longer one is cut to 20 and «...»', shortName('Б'.repeat(21)) === 'Б'.repeat(20) + '...',
+  shortName('Б'.repeat(21)));
+check('5k: no space before the dots', shortName('Круговое движение прямой ноги') === 'Круговое движение пр...',
+  shortName('Круговое движение прямой ноги'));
+store.resetStore(seedLists());
+store.updateExercise('e2', { name: 'Круговое движение прямой ноги на боку' });
+click(libRows()[1]);
+del();
+check('5k: the undo button carries the cut name',
+  label().startsWith('Восстановить Круговое движение пр... (Ctrl+Z) '), label());
+undoKey();
+
 // ---------- report ----------
 console.error = origError;
 const real = errors.filter((e) => !/MODULE_TYPELESS|Save failed|Could not load/.test(e));
