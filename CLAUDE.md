@@ -695,6 +695,16 @@ else.
   «Отменить перенос в <категория>» on the same stack as the deletions.
   `jsdom/cross-category` and `browser/cross-category`; gotcha 27 for the
   parked source node.
+- **Opening a category shows today.** On mounting the schedule page and on
+  clicking (or reorder-dragging) onto ANOTHER category's button,
+  `scrollToToday()` centres the Date_pointer in Complex_list and scrolls
+  Exercise_list so the first exercise of the complex after the pointer sits
+  top-edge-level with its block in that complex. The pointer is measured
+  through its neighbouring complex, because it is sticky and its own rect
+  reports the edge it is parked on. **Never called from
+  `switchCategoryMidDrag()`** — a drag carried into a category keeps its
+  "every accepting list at the end" scroll. Clicking the category already
+  open moves nothing. `browser/open-scroll`.
 - Menu button width is fixed by an invisible sizer span carrying the **saved**
   name — that is what keeps it steady on hover and while typing a longer name.
 - Store state is version 2. `migrate()` in `js/store.js` upgrades version-1
@@ -992,7 +1002,7 @@ whenever the plan allows a call again:
 
 ```
 npm install          once
-npm test             all 30 suites, ~1260 checks, ~180s
+npm test             all 31 suites, ~1270 checks, ~180s
 npm test -- jsdom    only the logic suites
 npm test -- drag     only suites matching "drag"
 ```

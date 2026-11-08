@@ -159,6 +159,7 @@ export function mountSchedulePage(container, navigate) {
 
   const unsubscribe = subscribe(render);
   render();
+  scrollToToday();
 
   if (pendingCategoryEdit) {
     const id = pendingCategoryEdit;
@@ -481,6 +482,48 @@ function dropLinkedClasses() {
 // Put the linked row as near the middle of the list as the list allows.
 // Measured, not computed from offsetTop - that is relative to whichever
 // ancestor happens to be positioned - and scrollTop clamps itself at both ends.
+// Opening a category shows today: Complex_list puts the Date_pointer in its
+// middle, and Exercise_list lines up the first exercise of the complex after
+// the pointer with that same exercise's block in the complex, top edge to top
+// edge. Called after the render that opened the category - a mount, or a click
+// or reorder-drag onto a category button - and NEVER from
+// switchCategoryMidDrag: a drag carried into another category keeps its own
+// "both lists at the end" behaviour.
+//
+// The pointer is measured through its neighbours, not by its own rect: it is
+// sticky, so once it would be out of view its rect reports the edge it is
+// parked against rather than where it really is in the list.
+function scrollToToday() {
+  if (!root) return;
+  const complexList = root.querySelector('.complex-list');
+  const pointer = complexList && complexList.querySelector('.date-pointer');
+  if (!pointer) return;
+
+  const next = pointer.nextElementSibling;
+  const prev = pointer.previousElementSibling;
+  let pointerY;
+  if (next && next.classList.contains('complex')) pointerY = next.getBoundingClientRect().top - 1;
+  else if (prev && prev.classList.contains('complex')) pointerY = prev.getBoundingClientRect().bottom + 1;
+  else return;
+
+  const listBox = complexList.getBoundingClientRect();
+  complexList.scrollTop += pointerY - (listBox.top + listBox.height / 2);
+
+  // Below the last complex there is no "current" complex to line up with.
+  if (!next || !next.classList.contains('complex')) return;
+  const item = next.querySelector('.exercise-row');
+  const exerciseList = root.querySelector('.exercise-list');
+  if (!item || !exerciseList) return;
+  const exercise = activeCategory().complexes
+    .flatMap((complex) => complex.items)
+    .find((entry) => entry.id === item.dataset.id);
+  if (!exercise) return;
+  // Hidden by the favourites filter, or gone: nothing to line up.
+  const row = exerciseList.querySelector('.exercise-row[data-id="' + exercise.exerciseId + '"]');
+  if (!row) return;
+  exerciseList.scrollTop += row.getBoundingClientRect().top - item.getBoundingClientRect().top;
+}
+
 function centerLinkedRow() {
   if (!root || linkedExerciseId === null) return;
 
@@ -1412,13 +1455,17 @@ function commitDragSelection(id) {
 
   clearSelection();
   setActiveCategory(id);
+  scrollToToday();
 }
 
 function activateCategory(id) {
-  // Only a real switch disarms the hover state.
-  if (id !== getState().ui.activeCategory) activeHoverArmed = false;
+  // Only a real switch disarms the hover state - and only a real switch
+  // re-aims the lists at today; clicking the open category leaves them be.
+  const switching = id !== getState().ui.activeCategory;
+  if (switching) activeHoverArmed = false;
   clearSelection();
   setActiveCategory(id);
+  if (switching) scrollToToday();
 }
 
 function clearCategoryDropMarkers() {

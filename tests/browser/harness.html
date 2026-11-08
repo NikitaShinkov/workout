@@ -28,6 +28,8 @@
     //   &start=today     schedule every category from today, so the workout
     //                    page - which only ever looks at today, tomorrow and
     //                    the day after - has something to show
+    //   &start=-N        start every category N days ago instead, so the
+    //                    Date_pointer sits in front of complex N
     //   &weekends=off    leave weekends out, as the app does by default; without
     //                    it every category includes them, so dates run on
     //                    calendar days the way the suites count them
@@ -39,6 +41,8 @@
     //   &everycategory=N  give every category without one a few complexes
     //                    (adding categories up to N), so
     //                    the workout page lists one per category per day
+    //   &per=N           with &everycategory: N exercises each instead of
+    //                    three, in complexes of 2 and 1 by turns
     //   &page=calendar   open on that page instead of the schedule
     //   &page=exercise   start the active category's first complex and open the
     //                    exercise page on it. Needs &start=today, since only
@@ -167,10 +171,30 @@
       const wanted = Number(params.get('everycategory')) || 0;
       for (let k = getState().categoryOrder.length; k < wanted; k += 1) addCategory('Категория ' + (k + 1));
       setActiveCategory(home);
+      // &per=N gives each N exercises, grouped into complexes of 2 and 1 in
+      // turn - long enough for both of its lists to scroll.
+      const per = Number(params.get('per')) || 0;
       let n = 0;
       for (const id of getState().categoryOrder) {
         if (getState().categories[id].complexes.length) continue;
         setActiveCategory(id);
+        if (per) {
+          for (let i = 0; i < per; i += 1) {
+            n += 1;
+            const [name, description] = EXERCISES[n % EXERCISES.length];
+            addExercise(createExercise({
+              name: getState().categories[id].name + ': ' + name + ' ' + (i + 1),
+              description,
+              images: [await makeImage('C' + n, COLORS[n % COLORS.length])],
+              equipment: ['mat'],
+            }));
+          }
+          const ids = activeCategory().exercises.map((e) => e.id);
+          for (let at = 0, size = 2; at < ids.length; at += size, size = 3 - size) {
+            createComplexFromExercises(ids.slice(at, at + size), activeCategory().complexes.length);
+          }
+          continue;
+        }
         for (let i = 0; i < 3; i += 1) {
           n += 1;
           addExercise(createExercise({
@@ -191,10 +215,14 @@
     // Every category's default start date is 3 сен, which is in the past for
     // most of the year. Moving it to today puts complexes on today, tomorrow
     // and the day after - the only three days the workout page ever shows.
-    if (params.get('start') === 'today') {
-      const today = toIsoDate(startOfDay());
+    // &start=-N starts it N days ago instead, which puts the Date_pointer in
+    // front of complex N - the middle of a long list rather than its top.
+    if (params.get('start') === 'today' || /^-\d+$/.test(params.get('start') || '')) {
+      const day = startOfDay();
+      if (params.get('start') !== 'today') day.setDate(day.getDate() + Number(params.get('start')));
+      const start = toIsoDate(day);
       for (const id of getState().categoryOrder) {
-        getState().categories[id].scheduleStartDate = today;
+        getState().categories[id].scheduleStartDate = start;
       }
     }
 
